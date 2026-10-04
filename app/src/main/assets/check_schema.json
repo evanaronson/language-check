@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "status": { "type": "string", "enum": ["ok", "unclear", "not_supported"] },
+    "language": { "type": "string", "enum": ["ca", "es", "other"] },
+    "has_errors": { "type": "boolean" },
+    "corrected": { "type": "string" },
+    "more_natural": { "type": "boolean" },
+    "natural": { "type": "string" }
+  },
+  "required": ["status", "language", "has_errors", "corrected", "more_natural", "natural"],
+  "propertyOrdering": ["status", "language", "has_errors", "corrected", "more_natural", "natural"]
+}

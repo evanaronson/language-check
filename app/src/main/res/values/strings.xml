@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Language Check</string>
+    <string name="check_action">Check</string>
+</resources>

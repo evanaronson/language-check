@@ -1,0 +1,23 @@
+{"text": "Bon dia! Com estas amb la pluja?", "status": "ok", "fix": true}
+{"text": "Ens veiem demà a les set?", "status": "ok", "fix": false, "natural": false}
+{"text": "Avui fa molt de calor, oi?", "status": "ok", "fix": false, "natural": false}
+{"text": "Tinc ganes de veure't aquest cap de setmana", "status": "ok", "fix": false, "natural": false}
+{"text": "M'agrada molt el teu nou pis", "status": "ok", "fix": false, "natural": false}
+{"text": "Ahir vaig anar al platja amb la meva germana", "status": "ok", "fix": true}
+{"text": "Jo sóc molt cansat avui", "status": "ok", "fix": true}
+{"text": "Has menjat ja?", "status": "ok", "fix": false}
+{"text": "Vull fer una pregunta a tu", "status": "ok"}
+{"text": "Hem de prendre una decisió aviat", "status": "ok", "fix": false, "natural": false}
+{"text": "Quedamos mañana a las ocho en la plaza?", "status": "ok", "fix": false, "natural": false}
+{"text": "que tal el finde? nosotros fuimos a la montaña", "status": "ok", "fix": false}
+{"text": "Me gusta mucho tu nuevo piso", "status": "ok", "fix": false, "natural": false}
+{"text": "Yo estoy muy cansado hoy porque trabajé mucho", "status": "ok", "fix": false}
+{"text": "Ayer yo fue al cine con mi hermana", "status": "ok", "fix": true}
+{"text": "Estoy embarazada de no saber la respuesta", "status": "ok"}
+{"text": "La problema es que no tengo tiempo", "status": "ok", "fix": true}
+{"text": "Te echo de menos, a ver si nos vemos pronto", "status": "ok", "fix": false, "natural": false}
+{"text": "Voy a tomar una ducha y te llamo", "status": "ok", "fix": false}
+{"text": "Muchas gracias por todo, eres un sol", "status": "ok", "fix": false, "natural": false}
+{"text": "verd la mesa per quan el si porta de", "status": "unclear"}
+{"text": "I'll be there in ten minutes", "status": "not_supported"}
+{"text": "Je suis en retard, désolé", "status": "not_supported"}
