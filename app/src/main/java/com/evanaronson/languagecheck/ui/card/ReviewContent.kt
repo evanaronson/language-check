@@ -1,6 +1,13 @@
 package com.evanaronson.languagecheck.ui.card
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -12,6 +19,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -23,10 +34,32 @@ import com.evanaronson.languagecheck.review.Settled
 /** Any assumptions, one section per judgment, then Undo and Done once something has been accepted. */
 @Composable
 internal fun ReviewContent(result: CheckResult.Reviewed, settled: List<Settled>, actions: CardActions) {
-    if (result.assumptions.isNotEmpty() || settled.isNotEmpty()) {
-        AssumptionsPanel(result.assumptions, settled, actions.onSettle)
-        Spacer(Modifier.height(12.dp))
+    // The assumptions are a page of their own: in from the right, back to the left.
+    var showingAssumptions by remember(result.assumptions, settled) { mutableStateOf(false) }
+    AnimatedContent(
+        targetState = showingAssumptions,
+        transitionSpec = {
+            val direction = if (targetState) 1 else -1
+            (slideInHorizontally { direction * it / 3 } + fadeIn()) togetherWith
+                (slideOutHorizontally { -direction * it / 3 } + fadeOut())
+        },
+        label = "assumptions",
+    ) { assumptionsPage ->
+        Column {
+            if (assumptionsPage) {
+                AssumptionsPage(result.assumptions, settled, actions.onSettle, onBack = { showingAssumptions = false })
+            } else {
+                val count = settled.size + result.assumptions.count { a -> settled.none { it.about == a.about } }
+                AssumptionsEntry(count, onOpen = { showingAssumptions = true })
+                if (count > 0) Spacer(Modifier.height(8.dp))
+                Suggestions(result, actions)
+            }
+        }
     }
+}
+
+@Composable
+private fun Suggestions(result: CheckResult.Reviewed, actions: CardActions) {
     if (result.looksGood) {
         val checked = result.kinds.map { if (it == EditKind.Fix) "No fixes" else "Sounds natural" }
         Verdict(Mark.Good, "Looks good", checked.joinToString(" · "))
