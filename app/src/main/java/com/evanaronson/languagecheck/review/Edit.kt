@@ -21,11 +21,16 @@ data class Edit(
 ) {
     val isInsertion get() = start == end
 
+    /**
+     * Whether two edits touch: their spans share a character, an insertion lands
+     * strictly inside the other's span, or two insertions land at the same place.
+     * Edits that only sit next to each other don't touch.
+     */
     fun overlaps(other: Edit): Boolean = when {
         !isInsertion && !other.isInsertion -> start < other.end && other.start < end
         isInsertion && !other.isInsertion -> other.start < start && start < other.end
         !isInsertion && other.isInsertion -> start < other.start && other.start < end
-        else -> start == other.start && kind != other.kind
+        else -> start == other.start
     }
 }
 

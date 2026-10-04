@@ -89,7 +89,7 @@ class ReviewTest {
     }
 
     @Test
-    fun acceptingARewordingRetiresFixesInsideIt() {
+    fun acceptingEitherKindRetiresTheOtherKindWhereTheyTouch() {
         val original = "Bon dia! Com estas amb la pluja?"
         val revision = reviewed(
             original,
@@ -105,17 +105,43 @@ class ReviewTest {
         val fix = revision.remaining(EditKind.Fix).single()
         val natural = revision.remaining(EditKind.Natural).single()
 
-        // Rewording first: the fix inside it disappears.
+        // Rewording first: the fix inside it is retired.
         val reworded = revision.accept(natural.id)
         assertEquals("Bon dia! Com portes la pluja?", reworded.workingText)
         assertTrue(reworded.remaining(EditKind.Fix).isEmpty())
+        assertEquals(reworded, reworded.accept(fix.id))
 
-        // Fix first, then rewording: same result.
-        val fixedThenReworded = revision.accept(fix.id).accept(natural.id)
-        assertEquals("Bon dia! Com portes la pluja?", fixedThenReworded.workingText)
+        // Fix first: the rewording over it is retired, and can't be accepted.
+        val fixed = revision.accept(fix.id)
+        assertEquals("Bon dia! Com estàs amb la pluja?", fixed.workingText)
+        assertTrue(fixed.remaining(EditKind.Natural).isEmpty())
+        assertEquals(fixed, fixed.accept(natural.id))
 
-        // Undoing the rewording brings the accepted fix back into effect.
-        assertEquals("Bon dia! Com estàs amb la pluja?", fixedThenReworded.undo().workingText)
+        // Undo brings back what was accepted and what it retired.
+        assertEquals(revision.remaining(EditKind.Natural), fixed.undo().remaining(EditKind.Natural))
+        assertEquals(original, fixed.undo().workingText)
+    }
+
+    @Test
+    fun changesThatOnlySitNextToEachOtherDontRetireEachOther() {
+        val revision = reviewed(
+            "vamos a comer algunos snacks de de una bodega o algo",
+            Verdict(
+                status = Verdict.Status.Ok,
+                hasErrors = true,
+                corrected = "vamos a comer algunos snacks de una bodega o algo.",
+                moreNatural = true,
+                natural = "vamos a comer unos snacks de una tienda o algo.",
+            ),
+        ).revision
+
+        // The rewordings don't touch the fixes, so accepting all of one kind leaves the other.
+        val fixed = revision.acceptAll(EditKind.Fix)
+        assertEquals(listOf("unos", "tienda"), fixed.remaining(EditKind.Natural).map { it.replacement })
+        assertEquals(
+            "vamos a comer unos snacks de una tienda o algo.",
+            fixed.acceptAll(EditKind.Natural).workingText,
+        )
     }
 
     @Test
