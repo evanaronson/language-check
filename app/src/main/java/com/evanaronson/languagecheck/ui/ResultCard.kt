@@ -134,12 +134,12 @@ private fun highlighted(suggestion: Suggestion, accent: Color): AnnotatedString 
 @Composable
 private fun Failure(reason: CheckFailure.Reason, actions: CardActions) {
     val (title, detail) = when (reason) {
-        CheckFailure.Reason.NoKey -> "Add your Gemini API key" to null
+        CheckFailure.Reason.NoKey -> "Add an API key" to null
         CheckFailure.Reason.BadKey -> "API key rejected" to "Check it in settings"
         CheckFailure.Reason.Offline -> "No connection" to null
         CheckFailure.Reason.Timeout -> "Took too long" to null
         CheckFailure.Reason.RateLimited -> "Rate limited" to "Try again in a moment"
-        CheckFailure.Reason.Server -> "Gemini isn't responding" to null
+        CheckFailure.Reason.Server -> "The model isn't responding" to null
         CheckFailure.Reason.BadResponse -> "Couldn't read the answer" to null
     }
     Verdict(Mark.Problem, title, detail)

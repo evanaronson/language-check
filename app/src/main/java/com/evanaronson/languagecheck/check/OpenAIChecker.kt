@@ -4,36 +4,37 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
-/**
- * Calls the Gemini Developer API's generateContent over plain REST.
- * The official SDKs pull in Firebase or Ktor plus Google auth; one POST doesn't need them.
- */
-class GeminiChecker(
+/** Calls OpenAI's Responses API over plain REST, with the same prompt and schema as Gemini. */
+class OpenAIChecker(
     private val http: OkHttpClient,
     private val prompt: Prompt,
     private val apiKey: () -> String?,
     private val model: String = MODEL,
 ) : Checker {
     private val json = Json { ignoreUnknownKeys = true }
-    private val schema = json.parseToJsonElement(prompt.schemaJson)
+
+    // Strict structured output rejects Gemini's propertyOrdering and requires additionalProperties.
+    private val schema = JsonObject(
+        json.parseToJsonElement(prompt.schemaJson).jsonObject - "propertyOrdering" +
+            ("additionalProperties" to JsonPrimitive(false)),
+    )
 
     override suspend fun check(text: String): ModelVerdict {
         val key = apiKey() ?: throw CheckFailure(CheckFailure.Reason.NoKey)
         val request = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-            .header("x-goog-api-key", key)
+            .url("https://api.openai.com/v1/responses")
+            .header("Authorization", "Bearer $key")
             .post(body(text).toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
@@ -43,33 +44,30 @@ class GeminiChecker(
     }
 
     private fun body(text: String): JsonObject = buildJsonObject {
-        putJsonObject("systemInstruction") {
-            putJsonArray("parts") { add(buildJsonObject { put("text", prompt.system) }) }
-        }
-        putJsonArray("contents") {
-            add(
-                buildJsonObject {
-                    put("role", "user")
-                    putJsonArray("parts") { add(buildJsonObject { put("text", "Text: $text") }) }
-                },
-            )
-        }
-        putJsonObject("generationConfig") {
-            put("responseMimeType", "application/json")
-            put("responseJsonSchema", schema)
-            put("maxOutputTokens", 512)
-            // Minimal thinking keeps a check inside the ~2 s budget.
-            putJsonObject("thinkingConfig") { put("thinkingLevel", "MINIMAL") }
+        put("model", model)
+        put("instructions", prompt.system)
+        put("input", "Text: $text")
+        put("store", false)
+        put("max_output_tokens", 512)
+        // No reasoning keeps a check inside the ~2 s budget.
+        putJsonObject("reasoning") { put("effort", "none") }
+        putJsonObject("text") {
+            putJsonObject("format") {
+                put("type", "json_schema")
+                put("name", "check")
+                put("strict", true)
+                put("schema", schema)
+            }
         }
     }
 
     private fun parse(payload: String): ModelVerdict = try {
-        val candidate = json.parseToJsonElement(payload).jsonObject["candidates"]
-            ?.jsonArray?.firstOrNull()?.jsonObject
-            ?: throw CheckFailure(CheckFailure.Reason.BadResponse)
-        val answer = candidate["content"]?.jsonObject?.get("parts")?.jsonArray.orEmpty()
+        val answer = json.parseToJsonElement(payload).jsonObject["output"]?.jsonArray.orEmpty()
             .map { it.jsonObject }
-            .filterNot { it["thought"]?.jsonPrimitive?.boolean == true }
+            .filter { it["type"]?.jsonPrimitive?.content == "message" }
+            .flatMap { it["content"]?.jsonArray.orEmpty() }
+            .map { it.jsonObject }
+            .filter { it["type"]?.jsonPrimitive?.content == "output_text" }
             .joinToString("") { it["text"]?.jsonPrimitive?.content.orEmpty() }
         json.decodeFromString<ModelVerdict>(answer)
     } catch (e: SerializationException) {
@@ -79,6 +77,6 @@ class GeminiChecker(
     }
 
     companion object {
-        const val MODEL = "gemini-3.5-flash-lite"
+        const val MODEL = "gpt-6-sol"
     }
 }

@@ -13,7 +13,7 @@ Every push to `main` builds a signed APK and publishes it as a GitHub release. O
 
 1. Open the latest release in this repo and download `language-check-N.apk`.
 2. Open it and allow your browser to install unknown apps when Android asks.
-3. Open **Language Check**, paste a [Gemini API key](https://aistudio.google.com/apikey), tap Save, and try a sentence.
+3. Open **Language Check**, pick Google Gemini or OpenAI, paste that provider's API key ([Gemini](https://aistudio.google.com/apikey), [OpenAI](https://platform.openai.com/api-keys)), tap Save, and try a sentence. Keys are stored encrypted on the phone; none are in the code.
 
 Later builds install over the previous one because they're all signed with the same key.
 
@@ -24,12 +24,13 @@ Later builds install over the previous one because they're all signed with the s
 | Selection-menu entry (`ACTION_PROCESS_TEXT`) and the floating card | `CheckActivity.kt`, `ui/ResultCard.kt` |
 | Instructions and output schema sent to the model | `app/src/main/assets/check_prompt.md`, `check_schema.json` |
 | Gemini call (plain REST, `gemini-3.5-flash-lite`, minimal thinking) | `check/GeminiChecker.kt` |
+| OpenAI call (Responses API, `gpt-6-sol`, no reasoning) | `check/OpenAIChecker.kt` |
 | Turning the verdict into card states, plus the word diff behind "1 fix" and highlights | `check/CheckResult.kt`, `check/WordDiff.kt` |
-| API key, encrypted with an Android Keystore key | `KeyStorage.kt` |
+| Provider choice and API keys, encrypted with an Android Keystore key | `KeyStorage.kt`, `MainActivity.kt` |
 
 Possible results: **Looks good** (no fixes, sounds natural); a fix and/or a more natural alternative; **Can't tell what this means**; **Not Catalan or Spanish**; or an error with Retry.
 
-Adding OpenAI means adding another `Checker` implementation; the prompt and schema are provider-neutral.
+Both providers use the same prompt and schema. Another provider is one more `Checker` implementation.
 
 ## Tuning the judgments
 
@@ -37,6 +38,7 @@ The prompt is where most of the product lives. To test a prompt change against r
 
 ```sh
 GEMINI_API_KEY=... python3 eval/run.py
+OPENAI_API_KEY=... python3 eval/run.py --provider openai
 ```
 
 Add cases to `eval/cases.jsonl` when the app gets something wrong.

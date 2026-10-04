@@ -5,32 +5,40 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.security.KeyStore
+import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Stores the provider API key in app-private preferences, encrypted with a
- * key held in the Android Keystore so it never leaves the device in clear text.
+ * Stores provider API keys in app-private preferences, encrypted with a key
+ * held in the Android Keystore, plus which provider checks use. Keys are
+ * entered on the settings screen and never live in the code.
  */
 class KeyStorage(context: Context) {
     private val prefs = context.getSharedPreferences("keys", Context.MODE_PRIVATE)
 
-    @Volatile private var cached: String? = null
+    private val cache = ConcurrentHashMap<Provider, String>()
 
-    fun geminiKey(): String? = cached ?: prefs.getString(GEMINI, null)
+    var provider: Provider
+        get() = prefs.getString(PROVIDER, null)
+            ?.let { name -> Provider.entries.firstOrNull { it.name == name } }
+            ?: Provider.Gemini
+        set(value) = prefs.edit().putString(PROVIDER, value.name).apply()
+
+    fun key(provider: Provider): String? = cache[provider] ?: prefs.getString(provider.name, null)
         ?.let { runCatching { decrypt(it) }.getOrNull() }
-        ?.also { cached = it }
+        ?.also { cache[provider] = it }
 
-    fun setGeminiKey(value: String) {
+    fun setKey(provider: Provider, value: String) {
         val key = value.trim()
         if (key.isEmpty()) {
-            prefs.edit().remove(GEMINI).apply()
-            cached = null
+            prefs.edit().remove(provider.name).apply()
+            cache.remove(provider)
         } else {
-            prefs.edit().putString(GEMINI, encrypt(key)).apply()
-            cached = key
+            prefs.edit().putString(provider.name, encrypt(key)).apply()
+            cache[provider] = key
         }
     }
 
@@ -67,6 +75,6 @@ class KeyStorage(context: Context) {
         const val ALIAS = "provider-keys"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val IV_BYTES = 12
-        const val GEMINI = "gemini"
+        const val PROVIDER = "provider"
     }
 }

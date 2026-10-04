@@ -19,6 +19,12 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -68,15 +74,29 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Settings(app: App) {
     val scope = rememberCoroutineScope()
+    var provider by remember { mutableStateOf(Provider.Gemini) }
+    var savedKeys by remember { mutableStateOf(emptySet<Provider>()) }
     var key by remember { mutableStateOf("") }
-    var hasKey by remember { mutableStateOf(false) }
     var sample by remember { mutableStateOf("Bon dia! Com estas amb la pluja?") }
     var result by remember { mutableStateOf<CardState?>(null) }
     var checked by remember { mutableStateOf("") }
 
     // Keystore access is slow enough to keep off the main thread.
     LaunchedEffect(Unit) {
-        hasKey = withContext(Dispatchers.IO) { app.keys.geminiKey() != null }
+        val (current, saved) = withContext(Dispatchers.IO) {
+            app.keys.provider to Provider.entries.filter { app.keys.key(it) != null }.toSet()
+        }
+        provider = current
+        savedKeys = saved
+    }
+
+    fun saveKey(value: String) {
+        val target = provider
+        scope.launch {
+            withContext(Dispatchers.IO) { app.keys.setKey(target, value) }
+            savedKeys = if (value.isBlank()) savedKeys - target else savedKeys + target
+            key = ""
+        }
     }
 
     fun runCheck() {
@@ -112,32 +132,55 @@ private fun Settings(app: App) {
         )
 
         Spacer(Modifier.height(8.dp))
-        Text("Gemini API key", style = MaterialTheme.typography.titleMedium)
+        Text("Model", style = MaterialTheme.typography.titleMedium)
+        Column(Modifier.selectableGroup()) {
+            Provider.entries.forEach { option ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = option == provider,
+                            role = Role.RadioButton,
+                            onClick = {
+                                provider = option
+                                key = ""
+                                scope.launch(Dispatchers.IO) { app.keys.provider = option }
+                            },
+                        )
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = option == provider, onClick = null)
+                    Spacer(Modifier.width(12.dp))
+                    Text(option.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    if (option in savedKeys) {
+                        Text(
+                            "Key saved",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+        }
+
         OutlinedTextField(
             value = key,
             onValueChange = { key = it },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            placeholder = { Text(if (hasKey) "Saved — paste to replace" else "Paste key") },
+            label = { Text("${provider.label} API key") },
+            placeholder = { Text(if (provider in savedKeys) "Saved. Paste to replace" else "Paste key") },
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                enabled = key.isNotBlank(),
-                onClick = {
-                    val value = key
-                    scope.launch {
-                        withContext(Dispatchers.IO) { app.keys.setGeminiKey(value) }
-                        hasKey = true
-                        key = ""
-                    }
-                },
-            ) { Text("Save") }
+            Button(enabled = key.isNotBlank(), onClick = { saveKey(key) }) { Text("Save") }
+            if (provider in savedKeys) {
+                TextButton(onClick = { saveKey("") }) { Text("Remove") }
+            }
             TextButton(onClick = {
-                context.startActivity(
-                    Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey")),
-                )
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(provider.keyUrl)))
             }) { Text("Get a key") }
         }
 

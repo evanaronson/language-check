@@ -2,7 +2,8 @@
 """Runs the app's exact prompt and schema against eval/cases.jsonl and reports
 judgment mismatches and latency.
 
-    GEMINI_API_KEY=... python3 eval/run.py [--model gemini-3.5-flash-lite]
+    GEMINI_API_KEY=... python3 eval/run.py
+    OPENAI_API_KEY=... python3 eval/run.py --provider openai
 
 Each case may set "status", "fix" (a correction is expected or not) and
 "natural" (a more natural alternative is expected or not). Omitted fields
@@ -22,7 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "app/src/main/assets"
 
 
-def check(model, key, system, schema, text):
+def check_gemini(model, key, system, schema, text):
     body = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": f"Text: {text}"}]}],
@@ -38,20 +39,60 @@ def check(model, key, system, schema, text):
         data=json.dumps(body).encode(),
         headers={"x-goog-api-key": key, "Content-Type": "application/json"},
     )
-    start = time.monotonic()
-    with urllib.request.urlopen(request, timeout=30) as response:
-        payload = json.load(response)
-    elapsed = time.monotonic() - start
+    payload, elapsed = post(request)
     parts = payload["candidates"][0]["content"]["parts"]
     answer = "".join(p.get("text", "") for p in parts if not p.get("thought"))
     return json.loads(answer), elapsed
 
 
+def check_openai(model, key, system, schema, text):
+    # Mirrors OpenAIChecker: strict mode needs additionalProperties and rejects propertyOrdering.
+    schema = {k: v for k, v in schema.items() if k != "propertyOrdering"}
+    schema["additionalProperties"] = False
+    body = {
+        "model": model,
+        "instructions": system,
+        "input": f"Text: {text}",
+        "store": False,
+        "max_output_tokens": 512,
+        "reasoning": {"effort": "none"},
+        "text": {"format": {"type": "json_schema", "name": "check", "strict": True, "schema": schema}},
+    }
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(body).encode(),
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
+    payload, elapsed = post(request)
+    answer = "".join(
+        c.get("text", "")
+        for item in payload["output"] if item.get("type") == "message"
+        for c in item["content"] if c.get("type") == "output_text"
+    )
+    return json.loads(answer), elapsed
+
+
+def post(request):
+    start = time.monotonic()
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload = json.load(response)
+    return payload, time.monotonic() - start
+
+
+PROVIDERS = {
+    "gemini": (check_gemini, "gemini-3.5-flash-lite", "GEMINI_API_KEY"),
+    "openai": (check_openai, "gpt-6-sol", "OPENAI_API_KEY"),
+}
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="gemini-3.5-flash-lite")
+    parser.add_argument("--provider", choices=PROVIDERS, default="gemini")
+    parser.add_argument("--model", help="override the provider's default model")
     args = parser.parse_args()
-    key = os.environ["GEMINI_API_KEY"]
+    check, default_model, key_var = PROVIDERS[args.provider]
+    model = args.model or default_model
+    key = os.environ[key_var]
     system = (ASSETS / "check_prompt.md").read_text()
     schema = json.loads((ASSETS / "check_schema.json").read_text())
     cases = [json.loads(line) for line in (ROOT / "eval/cases.jsonl").read_text().splitlines() if line.strip()]
@@ -59,7 +100,7 @@ def main():
     times, failures = [], 0
     for case in cases:
         try:
-            verdict, elapsed = check(args.model, key, system, schema, case["text"])
+            verdict, elapsed = check(model, key, system, schema, case["text"])
         except (urllib.error.URLError, KeyError, json.JSONDecodeError) as error:
             failures += 1
             print(f"ERROR  {case['text']}\n       {error}")
