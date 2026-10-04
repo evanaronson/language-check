@@ -44,6 +44,8 @@ fun FloatingCard(
             .padding(16.dp),
         contentAlignment = alignment,
     ) {
+        // Long text scrolls inside the card; keep some of the app visible to tap away.
+        val cardMaxHeight = maxHeight * 0.8f
         Column(
             Modifier
                 .widthIn(max = 520.dp)
@@ -56,8 +58,7 @@ fun FloatingCard(
             ResultCard(
                 state = state,
                 actions = actions,
-                // Long text scrolls inside the card; keep some of the app visible to tap away.
-                modifier = Modifier.fillMaxWidth().heightIn(max = maxHeight * 0.8f),
+                modifier = Modifier.fillMaxWidth().heightIn(max = cardMaxHeight),
             )
         }
     }
