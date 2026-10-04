@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.evanaronson.languagecheck"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.evanaronson.languagecheck"
