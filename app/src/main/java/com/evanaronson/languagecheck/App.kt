@@ -49,7 +49,7 @@ class App : Application() {
         // Key decryption and prompt loading happen on first use; keep them off the main thread.
         val (verdict, language) = withContext(Dispatchers.IO) {
             val language = settings.language
-            checker().check(text, language?.promptName) to language
+            checker().check(text, language?.promptName, settings.punctuation.promptName) to language
         }
         return interpret(text, verdict, language?.name)
     }

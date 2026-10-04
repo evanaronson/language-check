@@ -30,7 +30,7 @@ Later builds install over the previous one because they're all signed with the s
 
 Possible results: **Looks good** (no fixes, sounds natural); fixes and/or a more natural alternative, each change highlighted separately (tap one for the reason); **Can't tell what this means**; **Not <language>** when a language is pinned in settings; or an error with Retry.
 
-Settings has a language picker (auto-detect by default, or pin Catalan or Spanish; add more in `Language.kt`) and a model picker that lists the models your key can use, live from the provider, with the recommended model as the default.
+Settings has a language picker (auto-detect by default, or pin Catalan or Spanish; add more in `Language.kt`), a punctuation level (Strict, Moderate by default, or Casual; defined in the prompt) and a model picker that lists the models your key can use, live from the provider, with the recommended model as the default.
 
 Both providers use the same prompt and schema. Another provider is one more `Checker` implementation.
 

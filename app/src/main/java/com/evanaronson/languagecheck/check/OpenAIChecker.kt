@@ -30,30 +30,30 @@ class OpenAIChecker(
     /** Models that rejected reasoning effort "none"; they get their default instead. */
     private val noReasoningControl = ConcurrentHashMap.newKeySet<String>()
 
-    override suspend fun check(text: String, language: String?): ModelVerdict {
+    override suspend fun check(text: String, language: String?, punctuation: String): ModelVerdict {
         val key = apiKey() ?: throw CheckFailure(CheckFailure.Reason.NoKey)
         val model = model()
         val noReasoning = model !in noReasoningControl
         val request = Request.Builder()
             .url("https://api.openai.com/v1/responses")
             .header("Authorization", "Bearer $key")
-            .post(body(model, text, language, noReasoning).toString().toRequestBody(JSON_MEDIA_TYPE))
+            .post(body(model, text, language, punctuation, noReasoning).toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
         val (code, payload) = http.newCall(request).await()
         if (code == 400 && noReasoning && "reasoning" in payload.lowercase()) {
             noReasoningControl += model
-            return check(text, language)
+            return check(text, language, punctuation)
         }
         if (code != 200) throw CheckFailure(failureFor(code, payload))
         return parse(payload)
     }
 
-    private fun body(model: String, text: String, language: String?, noReasoning: Boolean): JsonObject =
+    private fun body(model: String, text: String, language: String?, punctuation: String, noReasoning: Boolean): JsonObject =
         buildJsonObject {
             put("model", model)
             put("instructions", prompt.system)
-            put("input", userMessage(text, language))
+            put("input", userMessage(text, language, punctuation))
             put("store", false)
             put("max_output_tokens", 1024)
             // No reasoning keeps a check inside the ~2 s budget.

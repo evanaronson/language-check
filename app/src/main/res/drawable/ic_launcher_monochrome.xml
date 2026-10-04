@@ -4,20 +4,11 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <group
-        android:pivotX="54"
-        android:pivotY="56"
-        android:scaleX="1.1"
-        android:scaleY="1.1"
-        android:translateY="-2">
+    <!-- Sized to Android's adaptive-icon keylines: the mark spans about 48dp, well inside the 66dp safe zone. -->
+    <group android:translateY="-2">
         <path
             android:fillColor="#FFFFFF"
             android:fillType="evenOdd"
-            android:pathData="M36,26h36a10,10 0,0 1,10 10v30a10,10 0,0 1,-10 10H48l-12,10v-10a10,10 0,0 1,-10 -10V36a10,10 0,0 1,10 -10zM35.5,37h11.0a2.5,2.5 0,0 1,0 5h-11.0a2.5,2.5 0,0 1,0 -5zM55.5,37h17.0a2.5,2.5 0,0 1,0 5h-17.0a2.5,2.5 0,0 1,0 -5zM35.5,51h6.0a2.5,2.5 0,0 1,0 5h-6.0a2.5,2.5 0,0 1,0 -5zM68.5,51h4.0a2.5,2.5 0,0 1,0 5h-4.0a2.5,2.5 0,0 1,0 -5zM35.5,65h19.0a2.5,2.5 0,0 1,0 5h-19.0a2.5,2.5 0,0 1,0 -5zM63.5,65h9.0a2.5,2.5 0,0 1,0 5h-9.0a2.5,2.5 0,0 1,0 -5zM50.5,51h9.0a2.5,2.5 0,0 1,0 5h-9.0a2.5,2.5 0,0 1,0 -5z" />
-        <path
-            android:pathData="M53.5,47.5l4,-4.5"
-            android:strokeWidth="2.6"
-            android:strokeColor="#FFFFFF"
-            android:strokeLineCap="round" />
+            android:pathData="M42,34h24a12,12 0,0 1,12 12v12a12,12 0,0 1,-12 12H50l-11,8v-8.4A12,12 0,0 1,30 58V46a12,12 0,0 1,12 -12zM40,42h16a3,3 0,0 1,0 6h-16a3,3 0,0 1,0 -6zM65,42h4a3,3 0,0 1,0 6h-4a3,3 0,0 1,0 -6zM40,58h28a3,3 0,0 1,0 6h-28a3,3 0,0 1,0 -6zM45.08,38.58L49.08,34.58L50.92,36.42L46.92,40.42Z" />
     </group>
 </vector>

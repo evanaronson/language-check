@@ -26,3 +26,5 @@
 {"text": "Hola qué tal bb estás bien te encanta esta música no?", "status": "ok", "fix": true}
 {"text": "Bon dia com estàs avui vols venir a sopar", "status": "ok", "fix": true}
 {"text": "Ens veiem demà a les set", "status": "ok", "fix": false}
+{"text": "Hola qué tal bb estás bien", "punctuation": "casual", "status": "ok", "fix": false}
+{"text": "Ens veiem demà a les set", "punctuation": "strict", "status": "ok", "fix": true}

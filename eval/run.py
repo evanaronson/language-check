@@ -6,7 +6,7 @@ judgment mismatches and latency.
     OPENAI_API_KEY=... python3 eval/run.py --provider openai
 
 Each case may set "language" (as the app's language setting names it; default
-auto), "status", "fix" (a correction is expected or not) and "natural" (a more
+auto), "punctuation" (strict, moderate or casual; default moderate), "status", "fix" (a correction is expected or not) and "natural" (a more
 natural alternative is expected or not). Omitted fields aren't checked. "natural": false cases are the important ones: they catch the
 app nagging about language that is already fine.
 """
@@ -99,7 +99,8 @@ def main():
     times, failures = [], 0
     for case in cases:
         try:
-            message = f"Language: {case.get('language', 'auto')}\nText: {case['text']}"
+            message = (f"Language: {case.get('language', 'auto')}\n"
+                       f"Punctuation: {case.get('punctuation', 'moderate')}\nText: {case['text']}")
             verdict, elapsed = check(model, key, system, schema, message)
         except (urllib.error.URLError, KeyError, json.JSONDecodeError) as error:
             failures += 1

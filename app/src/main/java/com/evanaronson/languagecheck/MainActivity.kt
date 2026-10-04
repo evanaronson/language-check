@@ -87,6 +87,7 @@ private fun Settings(app: App) {
     val scope = rememberCoroutineScope()
     var loaded by remember { mutableStateOf(false) }
     var language by remember { mutableStateOf<Language?>(null) }
+    var punctuation by remember { mutableStateOf(Punctuation.Moderate) }
     var provider by remember { mutableStateOf(Provider.Gemini) }
     var keyStatus by remember { mutableStateOf(emptyMap<Provider, KeyStatus>()) }
     val savedKeys = keyStatus.filterValues { it is KeyStatus.Saved }.keys
@@ -109,6 +110,7 @@ private fun Settings(app: App) {
         language = state.first
         provider = state.second
         keyStatus = state.third
+        punctuation = withContext(Dispatchers.IO) { app.settings.punctuation }
         loaded = true
     }
 
@@ -177,7 +179,7 @@ private fun Settings(app: App) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Section("Language")
+        Section("Checking")
         Dropdown(
             label = "Check text as",
             selected = language?.name ?: "Auto-detect",
@@ -187,6 +189,22 @@ private fun Settings(app: App) {
                 language = choice
                 scope.launch(Dispatchers.IO) { app.settings.language = choice }
             },
+        )
+
+        Dropdown(
+            label = "Punctuation",
+            selected = punctuation.label,
+            options = Punctuation.entries,
+            optionLabel = { it.label },
+            onSelect = { choice ->
+                punctuation = choice
+                scope.launch(Dispatchers.IO) { app.settings.punctuation = choice }
+            },
+        )
+        Text(
+            punctuation.description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Section("Model")

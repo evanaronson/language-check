@@ -33,14 +33,14 @@ class GeminiChecker(
     /** Models that rejected the minimal thinking level; they get the default instead. */
     private val noMinimalThinking = ConcurrentHashMap.newKeySet<String>()
 
-    override suspend fun check(text: String, language: String?): ModelVerdict {
+    override suspend fun check(text: String, language: String?, punctuation: String): ModelVerdict {
         val key = apiKey() ?: throw CheckFailure(CheckFailure.Reason.NoKey)
         val model = model()
         val minimal = model !in noMinimalThinking
-        val (code, payload) = send(key, model, body(text, language, minimal))
+        val (code, payload) = send(key, model, body(text, language, punctuation, minimal))
         if (code == 400 && minimal && "thinking" in payload.lowercase()) {
             noMinimalThinking += model
-            return check(text, language)
+            return check(text, language, punctuation)
         }
         if (code != 200) throw CheckFailure(failureFor(code, payload))
         return parse(payload)
@@ -55,7 +55,7 @@ class GeminiChecker(
         return http.newCall(request).await()
     }
 
-    private fun body(text: String, language: String?, minimalThinking: Boolean): JsonObject = buildJsonObject {
+    private fun body(text: String, language: String?, punctuation: String, minimalThinking: Boolean): JsonObject = buildJsonObject {
         putJsonObject("systemInstruction") {
             putJsonArray("parts") { add(buildJsonObject { put("text", prompt.system) }) }
         }
@@ -63,7 +63,7 @@ class GeminiChecker(
             add(
                 buildJsonObject {
                     put("role", "user")
-                    putJsonArray("parts") { add(buildJsonObject { put("text", userMessage(text, language)) }) }
+                    putJsonArray("parts") { add(buildJsonObject { put("text", userMessage(text, language, punctuation)) }) }
                 },
             )
         }

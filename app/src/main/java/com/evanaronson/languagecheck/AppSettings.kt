@@ -20,6 +20,12 @@ class AppSettings(context: Context) {
         get() = Language.byCode(prefs.getString(LANGUAGE, null))
         set(value) = prefs.edit().putString(LANGUAGE, value?.code).apply()
 
+    var punctuation: Punctuation
+        get() = prefs.getString(PUNCTUATION, null)
+            ?.let { name -> Punctuation.entries.firstOrNull { it.name == name } }
+            ?: Punctuation.Moderate
+        set(value) = prefs.edit().putString(PUNCTUATION, value.name).apply()
+
     /** The chosen model, or null for the provider's recommended one. */
     fun model(provider: Provider): String? = prefs.getString("model.${provider.name}", null)
 
@@ -29,5 +35,6 @@ class AppSettings(context: Context) {
     private companion object {
         const val PROVIDER = "provider"
         const val LANGUAGE = "language"
+        const val PUNCTUATION = "punctuation"
     }
 }
