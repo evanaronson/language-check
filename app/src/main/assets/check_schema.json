@@ -29,6 +29,9 @@
           "to": {
             "type": "string"
           },
+          "context": {
+            "type": "string"
+          },
           "why": {
             "type": "string"
           }
@@ -36,6 +39,7 @@
         "required": [
           "from",
           "to",
+          "context",
           "why"
         ],
         "additionalProperties": false
@@ -58,6 +62,9 @@
           "to": {
             "type": "string"
           },
+          "context": {
+            "type": "string"
+          },
           "why": {
             "type": "string"
           }
@@ -65,6 +72,7 @@
         "required": [
           "from",
           "to",
+          "context",
           "why"
         ],
         "additionalProperties": false

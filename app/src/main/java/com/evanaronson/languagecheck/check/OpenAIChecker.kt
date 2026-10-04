@@ -30,30 +30,30 @@ class OpenAIChecker(
     /** Models that rejected reasoning effort "none"; they get their default instead. */
     private val noReasoningControl = ConcurrentHashMap.newKeySet<String>()
 
-    override suspend fun check(text: String, language: String?, punctuation: String): ModelVerdict {
+    override suspend fun check(request: CheckRequest): ModelVerdict {
         val key = apiKey() ?: throw CheckFailure(CheckFailure.Reason.NoKey)
-        val model = model()
+        val model = request.model ?: model()
         val noReasoning = model !in noReasoningControl
         val request = Request.Builder()
             .url("https://api.openai.com/v1/responses")
             .header("Authorization", "Bearer $key")
-            .post(body(model, text, language, punctuation, noReasoning).toString().toRequestBody(JSON_MEDIA_TYPE))
+            .post(body(model, request, noReasoning).toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
         val (code, payload) = http.newCall(request).await()
         if (code == 400 && noReasoning && "reasoning" in payload.lowercase()) {
             noReasoningControl += model
-            return check(text, language, punctuation)
+            return check(request)
         }
-        if (code != 200) throw CheckFailure(failureFor(code, payload))
+        if (code != 200) throw failureFor(code, payload)
         return parse(payload)
     }
 
-    private fun body(model: String, text: String, language: String?, punctuation: String, noReasoning: Boolean): JsonObject =
+    private fun body(model: String, request: CheckRequest, noReasoning: Boolean): JsonObject =
         buildJsonObject {
             put("model", model)
             put("instructions", prompt.system)
-            put("input", userMessage(text, language, punctuation))
+            put("input", request.userMessage())
             put("store", false)
             // Room for a long paragraph twice over plus the list of changes.
             put("max_output_tokens", 4096)
@@ -77,10 +77,15 @@ class OpenAIChecker(
             .map { it.jsonObject }
             .filter { it["type"]?.jsonPrimitive?.content == "output_text" }
             .joinToString("") { it["text"]?.jsonPrimitive?.content.orEmpty() }
-        json.decodeFromString<ModelVerdict>(answer)
+        if (answer.isBlank()) throw CheckFailure(CheckFailure.Reason.BadResponse, "The model returned no answer")
+        try {
+            json.decodeFromString<ModelVerdict>(answer)
+        } catch (e: SerializationException) {
+            throw CheckFailure(CheckFailure.Reason.BadResponse, "The model's answer wasn't in the expected format", e)
+        }
     } catch (e: SerializationException) {
-        throw CheckFailure(CheckFailure.Reason.BadResponse, e)
+        throw CheckFailure(CheckFailure.Reason.BadResponse, cause = e)
     } catch (e: IllegalArgumentException) {
-        throw CheckFailure(CheckFailure.Reason.BadResponse, e)
+        throw CheckFailure(CheckFailure.Reason.BadResponse, cause = e)
     }
 }

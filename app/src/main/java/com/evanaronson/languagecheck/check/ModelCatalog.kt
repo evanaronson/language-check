@@ -45,7 +45,7 @@ class ModelCatalog(private val http: OkHttpClient) {
 
     private suspend fun get(request: Request): JsonObject {
         val (code, payload) = http.newCall(request).await()
-        if (code != 200) throw CheckFailure(failureFor(code, payload))
+        if (code != 200) throw failureFor(code, payload)
         return json.parseToJsonElement(payload).jsonObject
     }
 

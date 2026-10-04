@@ -57,16 +57,23 @@ fun HighlightedText(text: String, changes: List<Change>, accent: Color) {
             modifier = Modifier
                 .drawBehind {
                     val result = layout ?: return@drawBehind
-                    val padX = 3.dp.toPx()
+                    // Highlights grow a little past their text, except where two changes touch,
+                    // where both pull back so a gap keeps them visibly separate.
+                    val grow = 2.5.dp.toPx()
+                    val gap = 1.dp.toPx()
                     val padY = 1.dp.toPx()
-                    val radius = CornerRadius(6.dp.toPx())
+                    val radius = CornerRadius(5.dp.toPx())
                     changes.forEachIndexed { index, change ->
+                        val touchesBefore = changes.any { it.range.last + 1 == change.range.first }
+                        val touchesAfter = changes.any { it.range.first == change.range.last + 1 }
+                        val padLeft = if (touchesBefore) -gap else grow
+                        val padRight = if (touchesAfter) -gap else grow
                         val color = accent.copy(alpha = if (index == selected) 0.42f else 0.18f)
                         for ((left, top, right, bottom) in lineBoxes(result, change.range)) {
                             drawRoundRect(
                                 color = color,
-                                topLeft = Offset(left - padX, top + padY),
-                                size = Size(right - left + 2 * padX, bottom - top - 2 * padY),
+                                topLeft = Offset(left - padLeft, top + padY),
+                                size = Size(right - left + padLeft + padRight, bottom - top - 2 * padY),
                                 cornerRadius = radius,
                             )
                         }
@@ -75,8 +82,7 @@ fun HighlightedText(text: String, changes: List<Change>, accent: Color) {
                 .pointerInput(changes) {
                     detectTapGestures { position ->
                         val result = layout ?: return@detectTapGestures
-                        val offset = result.getOffsetForPosition(position)
-                        val hit = changes.indexOfFirst { offset in it.range || offset == it.range.last + 1 }
+                        val hit = changes.indexOfFirst { characterAt(result, position) in it.range }
                         selected = if (hit < 0 || hit == selected) null else hit
                     }
                 },
@@ -100,9 +106,13 @@ private fun Explanation(change: Change, replacement: String, accent: Color) {
             Column {
                 Text(
                     buildAnnotatedString {
-                        change.from?.let {
+                        val from = change.from
+                        if (from.isNullOrEmpty()) {
+                            // Something added, like a comma.
+                            append("+ ")
+                        } else {
                             pushStyle(SpanStyle(textDecoration = TextDecoration.LineThrough))
-                            append(it)
+                            append(from)
                             pop()
                             append("  →  ")
                         }
@@ -132,4 +142,21 @@ private fun lineBoxes(layout: TextLayoutResult, range: IntRange): List<LineBox> 
         val right = if (line == lastLine) layout.getBoundingBox(range.last).right else layout.getLineRight(line)
         LineBox(left, layout.getLineTop(line), right, layout.getLineBottom(line))
     }
+}
+
+/**
+ * The character under [position], or -1. getOffsetForPosition gives the
+ * nearest caret position, which for a narrow comma is often the one after it.
+ */
+private fun characterAt(layout: TextLayoutResult, position: Offset): Int {
+    val caret = layout.getOffsetForPosition(position)
+    val length = layout.layoutInput.text.length
+    for (candidate in listOf(caret, caret - 1)) {
+        if (candidate !in 0 until length) continue
+        val box = layout.getBoundingBox(candidate)
+        if (position.x >= box.left - 4 && position.x <= box.right + 4 && position.y in box.top..box.bottom) {
+            return candidate
+        }
+    }
+    return -1
 }

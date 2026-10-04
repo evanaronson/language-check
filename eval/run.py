@@ -6,7 +6,8 @@ judgment mismatches and latency.
     OPENAI_API_KEY=... python3 eval/run.py --provider openai
 
 Each case may set "language" (as the app's language setting names it; default
-auto), "punctuation" (strict, moderate or casual; default moderate), "status", "fix" (a correction is expected or not) and "natural" (a more
+auto), "punctuation" (strict, moderate or casual; default moderate), "checks"
+(both, fix or naturalize; default both), "status", "fix" (a correction is expected or not) and "natural" (a more
 natural alternative is expected or not). Omitted fields aren't checked. "natural": false cases are the important ones: they catch the
 app nagging about language that is already fine.
 """
@@ -100,7 +101,8 @@ def main():
     for case in cases:
         try:
             message = (f"Language: {case.get('language', 'auto')}\n"
-                       f"Punctuation: {case.get('punctuation', 'moderate')}\nText: {case['text']}")
+                       f"Punctuation: {case.get('punctuation', 'moderate')}\n"
+                       f"Checks: {case.get('checks', 'both')}\nText: {case['text']}")
             verdict, elapsed = check(model, key, system, schema, message)
         except (urllib.error.URLError, KeyError, json.JSONDecodeError) as error:
             failures += 1
@@ -120,11 +122,11 @@ def main():
         if verdict.get("corrected"):
             print(f"            fix: {verdict['corrected']}")
             for change in verdict.get("fixes", []):
-                print(f"                 {change['from']} -> {change['to']}  ({change['why']})")
+                print(f"                 {change['from'] or '+'} -> {change['to']}  [{change['context']}]  ({change['why']})")
         if verdict.get("natural"):
             print(f"        natural: {verdict['natural']}")
             for change in verdict.get("natural_changes", []):
-                print(f"                 {change['from']} -> {change['to']}  ({change['why']})")
+                print(f"                 {change['from'] or '+'} -> {change['to']}  [{change['context']}]  ({change['why']})")
         for problem in problems:
             print(f"        !! {problem}")
 

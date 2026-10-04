@@ -2,6 +2,7 @@ package com.evanaronson.languagecheck
 
 import android.app.Application
 import com.evanaronson.languagecheck.check.CheckFailure
+import com.evanaronson.languagecheck.check.CheckRequest
 import com.evanaronson.languagecheck.check.CheckResult
 import com.evanaronson.languagecheck.check.Checker
 import com.evanaronson.languagecheck.check.GeminiChecker
@@ -45,16 +46,38 @@ class App : Application() {
         Provider.OpenAI -> openAI
     }
 
-    /** Checks [text] with the provider, model and language chosen in settings. Throws CheckFailure. */
+    /** Checks [text] with the provider, model and options chosen in settings. Throws CheckFailure. */
     suspend fun check(text: String): CheckResult {
         if (text.length > MAX_CHARS) throw CheckFailure(CheckFailure.Reason.TooLong)
         // Key decryption and prompt loading happen on first use; keep them off the main thread.
-        val (verdict, language) = withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.IO) {
             val language = settings.language
-            checker().check(text, language?.promptName, settings.punctuation.promptName) to language
+            val checks = settings.checks
+            val verdict = checker().check(request(text, language, checks))
+            interpret(text, verdict, language?.name, checks.fixes, checks.naturalness)
         }
-        return interpret(text, verdict, language?.name)
     }
+
+    /**
+     * Runs a short check with [model] to see whether it works with this app.
+     * Returns the time taken, or throws CheckFailure with the provider's reason.
+     */
+    suspend fun testModel(provider: Provider, model: String): Long = withContext(Dispatchers.IO) {
+        val checker = when (provider) {
+            Provider.Gemini -> gemini
+            Provider.OpenAI -> openAI
+        }
+        val started = System.nanoTime()
+        checker.check(request("Bon dia, com estas?", null, Checks.Both).copy(model = model))
+        (System.nanoTime() - started) / 1_000_000
+    }
+
+    private fun request(text: String, language: Language?, checks: Checks) = CheckRequest(
+        text = text,
+        language = language?.promptName,
+        punctuation = settings.punctuation.promptName,
+        checks = checks.promptName,
+    )
 
     private companion object {
         /** About a page. Longer selections are past what this tool is for and would be slow. */

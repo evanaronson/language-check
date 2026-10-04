@@ -16,10 +16,10 @@ class InterpretTest {
                 language = "Catalan",
                 has_errors = true,
                 corrected = "Bon dia! Com estàs amb la pluja?",
-                fixes = listOf(ModelChange("estas", "estàs", "Missing accent")),
+                fixes = listOf(ModelChange("estas", "estàs", why = "Missing accent")),
                 more_natural = true,
                 natural = "Bon dia! Com portes la pluja?",
-                natural_changes = listOf(ModelChange("estàs amb", "portes", "Usual way to say it")),
+                natural_changes = listOf(ModelChange("estàs amb", "portes", why = "Usual way to say it")),
             ),
         ) as CheckResult.Feedback
 
@@ -41,9 +41,9 @@ class InterpretTest {
                 has_errors = true,
                 corrected = "uns tomàquets bons",
                 fixes = listOf(
-                    ModelChange("unes", "uns", "Masculine"),
-                    ModelChange("tomàquet", "tomàquets", "Plural"),
-                    ModelChange("bo", "bons", "Agreement"),
+                    ModelChange("unes", "uns", why = "Masculine"),
+                    ModelChange("tomàquet", "tomàquets", why = "Plural"),
+                    ModelChange("bo", "bons", why = "Agreement"),
                 ),
             ),
         ) as CheckResult.Feedback
@@ -61,7 +61,7 @@ class InterpretTest {
                 status = "ok",
                 has_errors = true,
                 corrected = "Bon dia! Com estàs amb la pluja?",
-                fixes = listOf(ModelChange("x", "not in the text", "?")),
+                fixes = listOf(ModelChange("x", "not in the text", why = "?")),
             ),
         ) as CheckResult.Feedback
 
@@ -78,7 +78,7 @@ class InterpretTest {
                 status = "ok",
                 has_errors = true,
                 corrected = "también está bien",
-                fixes = listOf(ModelChange("esta", "está", "Verb needs accent"), ModelChange("tambien", "también", "Accent")),
+                fixes = listOf(ModelChange("esta", "está", why = "Verb needs accent"), ModelChange("tambien", "también", why = "Accent")),
             ),
         ) as CheckResult.Feedback
 
@@ -95,10 +95,10 @@ class InterpretTest {
                 has_errors = true,
                 corrected = "Hola, ¿qué tal, bb? ¿Estás bien?",
                 fixes = listOf(
-                    ModelChange("Hola qué", "Hola, ¿qué", "Comma, then open the question"),
-                    ModelChange("tal bb", "tal, bb?", "Comma before name; close question"),
-                    ModelChange("estás", "¿Estás", "New question"),
-                    ModelChange("bien", "bien?", "Close question"),
+                    ModelChange("Hola qué", "Hola, ¿qué", why = "Comma, then open the question"),
+                    ModelChange("tal bb", "tal, bb?", why = "Comma before name; close question"),
+                    ModelChange("estás", "¿Estás", why = "New question"),
+                    ModelChange("bien", "bien?", why = "Close question"),
                 ),
             ),
         ) as CheckResult.Feedback
@@ -112,18 +112,60 @@ class InterpretTest {
     }
 
     @Test
+    fun eachPunctuationMarkIsItsOwnChange() {
+        val result = interpret(
+            "te encanta esta musica no",
+            ModelVerdict(
+                status = "ok",
+                has_errors = true,
+                corrected = "te encanta esta música, no?",
+                fixes = listOf(
+                    ModelChange("musica", "música", context = "esta música, no?", why = "Missing accent"),
+                    ModelChange("", ",", context = "música, no?", why = "Comma before a tag question"),
+                    ModelChange("", "?", context = "música, no?", why = "End of question"),
+                ),
+            ),
+        ) as CheckResult.Feedback
+
+        val correction = result.correction!!
+        assertEquals(3, correction.edits)
+        assertEquals(listOf("música", ",", "?"), correction.changes.map { correction.text.substring(it.range) })
+        assertEquals(listOf(16, 22, 26), correction.changes.map { it.range.first })
+        assertEquals("", correction.changes[1].from)
+    }
+
+    @Test
+    fun onlyRequestedJudgmentsAreShown() {
+        val verdict = ModelVerdict(
+            status = "ok",
+            has_errors = true,
+            corrected = "Bon dia! Com estàs amb la pluja?",
+            more_natural = true,
+            natural = "Bon dia! Com portes la pluja?",
+        )
+        val fixOnly = interpret(original, verdict, checkNaturalness = false) as CheckResult.Feedback
+        assertNull(fixOnly.natural)
+        val naturalOnly = interpret(original, verdict, checkFixes = false) as CheckResult.Feedback
+        assertNull(naturalOnly.correction)
+        assertEquals(
+            CheckResult.AllGood(checkedFixes = true, checkedNaturalness = false),
+            interpret(original, verdict.copy(has_errors = false), checkNaturalness = false),
+        )
+    }
+
+    @Test
     fun nothingToSayIsAllGood() {
         val verdict = ModelVerdict(status = "ok", language = "Catalan")
-        assertEquals(CheckResult.AllGood, interpret("Ens veiem demà a les set?", verdict))
+        assertEquals(CheckResult.AllGood(true, true), interpret("Ens veiem demà a les set?", verdict))
     }
 
     @Test
     fun aCorrectionIdenticalToTheOriginalIsNotAFix() {
         val verdict = ModelVerdict(
             status = "ok", has_errors = true, corrected = " $original ",
-            fixes = listOf(ModelChange("estas", "estas", "?")),
+            fixes = listOf(ModelChange("estas", "estas", why = "?")),
         )
-        assertEquals(CheckResult.AllGood, interpret(original, verdict))
+        assertEquals(CheckResult.AllGood(true, true), interpret(original, verdict))
     }
 
     @Test

@@ -26,6 +26,12 @@ class AppSettings(context: Context) {
             ?: Punctuation.Moderate
         set(value) = prefs.edit().putString(PUNCTUATION, value.name).apply()
 
+    var checks: Checks
+        get() = prefs.getString(CHECKS, null)
+            ?.let { name -> Checks.entries.firstOrNull { it.name == name } }
+            ?: Checks.Both
+        set(value) = prefs.edit().putString(CHECKS, value.name).apply()
+
     /** The chosen model, or null for the provider's recommended one. */
     fun model(provider: Provider): String? = prefs.getString("model.${provider.name}", null)
 
@@ -36,5 +42,6 @@ class AppSettings(context: Context) {
         const val PROVIDER = "provider"
         const val LANGUAGE = "language"
         const val PUNCTUATION = "punctuation"
+        const val CHECKS = "checks"
     }
 }

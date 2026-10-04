@@ -16,12 +16,18 @@ data class ModelVerdict(
 )
 
 @Serializable
-data class ModelChange(val from: String = "", val to: String = "", val why: String = "")
+data class ModelChange(
+    val from: String = "",
+    val to: String = "",
+    /** A few words of the new text around [to], so a lone comma can be placed exactly. */
+    val context: String = "",
+    val why: String = "",
+)
 
 /** What the result card shows. */
 sealed interface CheckResult {
-    /** Correct and natural: nothing to say. */
-    data object AllGood : CheckResult
+    /** Nothing to say about the judgments that were made. */
+    data class AllGood(val checkedFixes: Boolean, val checkedNaturalness: Boolean) : CheckResult
 
     /** The model could not tell what the text means. */
     data object Unclear : CheckResult
@@ -30,10 +36,12 @@ sealed interface CheckResult {
     data class WrongLanguage(val expected: String) : CheckResult
 
     data class Feedback(
-        /** Null when no correction is needed. */
+        /** Null when no correction is needed, or corrections weren't checked. */
         val correction: Suggestion?,
-        /** Null when the text already sounds natural. */
+        /** Null when the text already sounds natural, or naturalness wasn't checked. */
         val natural: Suggestion?,
+        val checkedFixes: Boolean = true,
+        val checkedNaturalness: Boolean = true,
     ) : CheckResult
 }
 
@@ -48,7 +56,7 @@ data class Suggestion(
 data class Change(
     /** Characters in the suggestion's text covered by this change. */
     val range: IntRange,
-    /** What the writer had, when known. */
+    /** What the writer had, when known; empty for something added, like a comma. */
     val from: String?,
     /** Short reason, when known. */
     val why: String?,
@@ -58,24 +66,30 @@ data class Change(
  * Turns a model verdict into what the card shows, discarding "changes" that
  * don't actually change anything so a no-op never shows up as a fix.
  */
-fun interpret(original: String, verdict: ModelVerdict, expectedLanguage: String? = null): CheckResult {
+fun interpret(
+    original: String,
+    verdict: ModelVerdict,
+    expectedLanguage: String? = null,
+    checkFixes: Boolean = true,
+    checkNaturalness: Boolean = true,
+): CheckResult {
     when (verdict.status) {
         "unclear" -> return CheckResult.Unclear
         "wrong_language" -> return expectedLanguage?.let { CheckResult.WrongLanguage(it) } ?: CheckResult.Unclear
     }
 
     val correction = verdict.corrected
-        .takeIf { verdict.has_errors }
+        .takeIf { checkFixes && verdict.has_errors }
         ?.let { suggestion(original, it, verdict.fixes) }
     val base = correction?.text ?: original
     val natural = verdict.natural
-        .takeIf { verdict.more_natural }
+        .takeIf { checkNaturalness && verdict.more_natural }
         ?.let { suggestion(base, it, verdict.natural_changes) }
 
     return if (correction == null && natural == null) {
-        CheckResult.AllGood
+        CheckResult.AllGood(checkFixes, checkNaturalness)
     } else {
-        CheckResult.Feedback(correction, natural)
+        CheckResult.Feedback(correction, natural, checkFixes, checkNaturalness)
     }
 }
 
@@ -93,20 +107,33 @@ private fun suggestion(from: String, to: String, reported: List<ModelChange>): S
     return Suggestion(text, changes, diff.edits)
 }
 
-/** Finds each reported change's replacement in [text], in order. */
+/**
+ * Places each reported change in [text], in order: finds its context, then
+ * its replacement inside that context, so a single added comma gets exactly
+ * its own highlight. Changes may touch but never overlap.
+ */
 internal fun locate(text: String, reported: List<ModelChange>): List<Change> {
     val changes = mutableListOf<Change>()
     var searchFrom = 0
     for (change in reported) {
         val target = change.to.trim()
         if (target.isEmpty()) continue
-        val index = find(text, target, searchFrom) ?: find(text, target, 0) ?: continue
-        val range = index until index + target.length
+        val range = placeInContext(text, change.context.trim(), target, searchFrom)
+            ?: (find(text, target, searchFrom) ?: find(text, target, 0))?.let { it until it + target.length }
+            ?: continue
         if (changes.any { it.range.first <= range.last && range.first <= it.range.last }) continue
-        changes += Change(range, change.from.trim().ifEmpty { null }, change.why.trim().ifEmpty { null })
-        searchFrom = range.last + 1
+        changes += Change(range, change.from.trim(), change.why.trim().ifEmpty { null })
+        // The next change may sit in the same few words (an accent, then a comma after it).
+        searchFrom = maxOf(0, minOf(range.first, text.lastIndexOf(' ', range.first).coerceAtLeast(0)))
     }
     return changes.sortedBy { it.range.first }
+}
+
+private fun placeInContext(text: String, context: String, target: String, searchFrom: Int): IntRange? {
+    if (context.isEmpty() || target !in context) return null
+    val at = find(text, context, searchFrom) ?: find(text, context, 0) ?: return null
+    val offset = context.indexOf(target)
+    return (at + offset) until (at + offset + target.length)
 }
 
 /**

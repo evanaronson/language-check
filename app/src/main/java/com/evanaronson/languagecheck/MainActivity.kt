@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.evanaronson.languagecheck.check.CheckFailure
@@ -75,6 +76,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** Result of trying the chosen model with a short check. */
+private sealed interface ModelTest {
+    data object Testing : ModelTest
+    data class Works(val millis: Long) : ModelTest
+    data class Failed(val message: String) : ModelTest
+}
+
 /** Models offered for a provider: still loading, loaded, or failed to load. */
 private sealed interface ModelList {
     data object Loading : ModelList
@@ -88,6 +96,8 @@ private fun Settings(app: App) {
     var loaded by remember { mutableStateOf(false) }
     var language by remember { mutableStateOf<Language?>(null) }
     var punctuation by remember { mutableStateOf(Punctuation.Moderate) }
+    var checks by remember { mutableStateOf(Checks.Both) }
+    var modelTest by remember { mutableStateOf<ModelTest?>(null) }
     var provider by remember { mutableStateOf(Provider.Gemini) }
     var keyStatus by remember { mutableStateOf(emptyMap<Provider, KeyStatus>()) }
     val savedKeys = keyStatus.filterValues { it is KeyStatus.Saved }.keys
@@ -111,6 +121,7 @@ private fun Settings(app: App) {
         provider = state.second
         keyStatus = state.third
         punctuation = withContext(Dispatchers.IO) { app.settings.punctuation }
+        checks = withContext(Dispatchers.IO) { app.settings.checks }
         loaded = true
     }
 
@@ -118,6 +129,7 @@ private fun Settings(app: App) {
     LaunchedEffect(loaded, provider, provider in savedKeys) {
         if (!loaded) return@LaunchedEffect
         model = withContext(Dispatchers.IO) { app.settings.model(provider) }
+        modelTest = null
         if (provider !in savedKeys) {
             models = ModelList.Loaded(emptyList())
             return@LaunchedEffect
@@ -148,6 +160,17 @@ private fun Settings(app: App) {
         }
     }
 
+    fun testModel(target: Provider, chosen: String) {
+        modelTest = ModelTest.Testing
+        scope.launch {
+            modelTest = try {
+                ModelTest.Works(app.testModel(target, chosen))
+            } catch (failure: CheckFailure) {
+                ModelTest.Failed(failure.detail ?: failure.reason.name)
+            }
+        }
+    }
+
     fun runCheck() {
         val text = sample.trim()
         if (text.isEmpty()) return
@@ -157,7 +180,7 @@ private fun Settings(app: App) {
             result = try {
                 CardState.Done(app.check(text))
             } catch (failure: CheckFailure) {
-                CardState.Failed(failure.reason)
+                CardState.Failed(failure.reason, failure.detail)
             }
         }
     }
@@ -206,28 +229,31 @@ private fun Settings(app: App) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Column(Modifier.selectableGroup()) {
+            Checks.entries.forEach { option ->
+                RadioRow(
+                    label = option.label,
+                    selected = option == checks,
+                    onClick = {
+                        checks = option
+                        scope.launch(Dispatchers.IO) { app.settings.checks = option }
+                    },
+                )
+            }
+        }
 
         Section("Model")
         Column(Modifier.selectableGroup()) {
             Provider.entries.forEach { option ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .selectable(
-                            selected = option == provider,
-                            role = Role.RadioButton,
-                            onClick = {
-                                provider = option
-                                key = ""
-                                scope.launch(Dispatchers.IO) { app.settings.provider = option }
-                            },
-                        )
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                RadioRow(
+                    label = option.label,
+                    selected = option == provider,
+                    onClick = {
+                        provider = option
+                        key = ""
+                        scope.launch(Dispatchers.IO) { app.settings.provider = option }
+                    },
                 ) {
-                    RadioButton(selected = option == provider, onClick = null)
-                    Spacer(Modifier.width(12.dp))
-                    Text(option.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                     when (val status = keyStatus[option]) {
                         is KeyStatus.Saved -> Text(
                             "Key ••••${status.lastFour}",
@@ -260,8 +286,34 @@ private fun Settings(app: App) {
                 model = choice
                 val target = provider
                 scope.launch(Dispatchers.IO) { app.settings.setModel(target, choice) }
+                if (target in savedKeys) testModel(target, choice ?: target.recommendedModel)
             },
         )
+        if (provider in savedKeys) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when (val test = modelTest) {
+                        null -> "Not tested yet"
+                        ModelTest.Testing -> "Testing…"
+                        is ModelTest.Works -> "✓ Works · %.1f s".format(test.millis / 1000.0)
+                        is ModelTest.Failed -> "✗ ${test.message}"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (modelTest is ModelTest.Failed) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    enabled = modelTest != ModelTest.Testing,
+                    onClick = { testModel(provider, model ?: provider.recommendedModel) },
+                ) { Text("Test") }
+            }
+        }
 
         when (val status = keyStatus[provider]) {
             is KeyStatus.Saved -> SavedKey(provider, status.lastFour, onRemove = { saveKey("") })
@@ -346,6 +398,22 @@ private fun SavedKey(provider: Provider, lastFour: String, onRemove: () -> Unit)
             }
             TextButton(onClick = onRemove) { Text("Remove") }
         }
+    }
+}
+
+@Composable
+private fun RadioRow(label: String, selected: Boolean, onClick: () -> Unit, trailing: @Composable () -> Unit = {}) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(12.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        trailing()
     }
 }
 

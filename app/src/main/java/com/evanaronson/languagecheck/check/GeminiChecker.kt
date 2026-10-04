@@ -33,16 +33,16 @@ class GeminiChecker(
     /** Models that rejected the minimal thinking level; they get the default instead. */
     private val noMinimalThinking = ConcurrentHashMap.newKeySet<String>()
 
-    override suspend fun check(text: String, language: String?, punctuation: String): ModelVerdict {
+    override suspend fun check(request: CheckRequest): ModelVerdict {
         val key = apiKey() ?: throw CheckFailure(CheckFailure.Reason.NoKey)
-        val model = model()
+        val model = request.model ?: model()
         val minimal = model !in noMinimalThinking
-        val (code, payload) = send(key, model, body(text, language, punctuation, minimal))
+        val (code, payload) = send(key, model, body(request, minimal))
         if (code == 400 && minimal && "thinking" in payload.lowercase()) {
             noMinimalThinking += model
-            return check(text, language, punctuation)
+            return check(request)
         }
-        if (code != 200) throw CheckFailure(failureFor(code, payload))
+        if (code != 200) throw failureFor(code, payload)
         return parse(payload)
     }
 
@@ -55,7 +55,7 @@ class GeminiChecker(
         return http.newCall(request).await()
     }
 
-    private fun body(text: String, language: String?, punctuation: String, minimalThinking: Boolean): JsonObject = buildJsonObject {
+    private fun body(request: CheckRequest, minimalThinking: Boolean): JsonObject = buildJsonObject {
         putJsonObject("systemInstruction") {
             putJsonArray("parts") { add(buildJsonObject { put("text", prompt.system) }) }
         }
@@ -63,7 +63,7 @@ class GeminiChecker(
             add(
                 buildJsonObject {
                     put("role", "user")
-                    putJsonArray("parts") { add(buildJsonObject { put("text", userMessage(text, language, punctuation)) }) }
+                    putJsonArray("parts") { add(buildJsonObject { put("text", request.userMessage()) }) }
                 },
             )
         }
@@ -85,10 +85,20 @@ class GeminiChecker(
             .map { it.jsonObject }
             .filterNot { it["thought"]?.jsonPrimitive?.boolean == true }
             .joinToString("") { it["text"]?.jsonPrimitive?.content.orEmpty() }
+        if (answer.isBlank()) {
+            val finish = candidate["finishReason"]?.jsonPrimitive?.content ?: "unknown"
+            throw CheckFailure(CheckFailure.Reason.BadResponse, "The model returned no answer ($finish)")
+        }
+        decode(answer)
+    } catch (e: SerializationException) {
+        throw CheckFailure(CheckFailure.Reason.BadResponse, cause = e)
+    } catch (e: IllegalArgumentException) {
+        throw CheckFailure(CheckFailure.Reason.BadResponse, cause = e)
+    }
+
+    private fun decode(answer: String): ModelVerdict = try {
         json.decodeFromString<ModelVerdict>(answer)
     } catch (e: SerializationException) {
-        throw CheckFailure(CheckFailure.Reason.BadResponse, e)
-    } catch (e: IllegalArgumentException) {
-        throw CheckFailure(CheckFailure.Reason.BadResponse, e)
+        throw CheckFailure(CheckFailure.Reason.BadResponse, "The model's answer wasn't in the expected format", e)
     }
 }

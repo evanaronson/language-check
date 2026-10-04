@@ -34,7 +34,7 @@ import com.evanaronson.languagecheck.check.Suggestion
 sealed interface CardState {
     data object Loading : CardState
     data class Done(val result: CheckResult) : CardState
-    data class Failed(val reason: CheckFailure.Reason) : CardState
+    data class Failed(val reason: CheckFailure.Reason, val detail: String? = null) : CardState
 }
 
 class CardActions(
@@ -72,7 +72,7 @@ fun ResultCard(
                 when (state) {
                     CardState.Loading -> Loading(original)
                     is CardState.Done -> Result(state.result, actions)
-                    is CardState.Failed -> Failure(state.reason, actions)
+                    is CardState.Failed -> Failure(state.reason, state.detail, actions)
                 }
             }
             // Fades out the bottom edge while there's more to scroll to.
@@ -105,7 +105,14 @@ private fun Loading(original: String) {
 @Composable
 private fun Result(result: CheckResult, actions: CardActions) {
     when (result) {
-        CheckResult.AllGood -> Verdict(Mark.Good, "Looks good", "No fixes · Sounds natural")
+        is CheckResult.AllGood -> Verdict(
+            Mark.Good,
+            "Looks good",
+            listOfNotNull(
+                "No fixes".takeIf { result.checkedFixes },
+                "Sounds natural".takeIf { result.checkedNaturalness },
+            ).joinToString(" · "),
+        )
         CheckResult.Unclear -> Verdict(Mark.Unsure, "Can't tell what this means")
         is CheckResult.WrongLanguage -> Verdict(Mark.Unsure, "Not ${result.expected}", "Change the language in settings")
         is CheckResult.Feedback -> Feedback(result, actions)
@@ -114,23 +121,29 @@ private fun Result(result: CheckResult, actions: CardActions) {
 
 @Composable
 private fun Feedback(result: CheckResult.Feedback, actions: CardActions) {
-    val correction = result.correction
-    if (correction == null) {
-        StatusLine(Mark.Good, "No fixes")
-    } else {
-        val label = if (correction.edits == 1) "1 fix" else "${correction.edits} fixes"
-        SuggestionBlock(label, correction, MaterialTheme.colorScheme.error, actions)
+    if (result.checkedFixes) {
+        val correction = result.correction
+        if (correction == null) {
+            StatusLine(Mark.Good, "No fixes")
+        } else {
+            val label = if (correction.edits == 1) "1 fix" else "${correction.edits} fixes"
+            SuggestionBlock(label, correction, MaterialTheme.colorScheme.error, actions)
+        }
     }
 
-    Spacer(Modifier.height(14.dp))
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    Spacer(Modifier.height(14.dp))
+    if (result.checkedFixes && result.checkedNaturalness) {
+        Spacer(Modifier.height(14.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Spacer(Modifier.height(14.dp))
+    }
 
-    val natural = result.natural
-    if (natural == null) {
-        StatusLine(Mark.Good, "Sounds natural")
-    } else {
-        SuggestionBlock("More natural", natural, MaterialTheme.colorScheme.primary, actions)
+    if (result.checkedNaturalness) {
+        val natural = result.natural
+        if (natural == null) {
+            StatusLine(Mark.Good, "Sounds natural")
+        } else {
+            SuggestionBlock("More natural", natural, MaterialTheme.colorScheme.primary, actions)
+        }
     }
 }
 
@@ -149,11 +162,11 @@ private fun SuggestionBlock(label: String, suggestion: Suggestion, accent: Color
 }
 
 @Composable
-private fun Failure(reason: CheckFailure.Reason, actions: CardActions) {
+private fun Failure(reason: CheckFailure.Reason, providerMessage: String?, actions: CardActions) {
     val (title, detail) = when (reason) {
         CheckFailure.Reason.NoKey -> "Add an API key" to null
         CheckFailure.Reason.BadKey -> "API key rejected" to "Check it in settings"
-        CheckFailure.Reason.BadModel -> "Model not available" to "Pick another in settings"
+        CheckFailure.Reason.BadModel -> "This model can't be used" to "Pick another in settings"
         CheckFailure.Reason.Offline -> "No connection" to null
         CheckFailure.Reason.Timeout -> "Took too long" to null
         CheckFailure.Reason.RateLimited -> "Rate limited" to "Try again in a moment"
@@ -162,6 +175,16 @@ private fun Failure(reason: CheckFailure.Reason, actions: CardActions) {
         CheckFailure.Reason.TooLong -> "Selection too long" to "Select up to about a page of text"
     }
     Verdict(Mark.Problem, title, detail)
+    if (providerMessage != null) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            providerMessage,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
     Spacer(Modifier.height(12.dp))
     val needsSettings = reason in setOf(CheckFailure.Reason.NoKey, CheckFailure.Reason.BadKey, CheckFailure.Reason.BadModel)
     if (needsSettings) {

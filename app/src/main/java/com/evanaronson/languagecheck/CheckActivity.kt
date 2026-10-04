@@ -109,7 +109,7 @@ class CheckActivity : ComponentActivity() {
             state = try {
                 CardState.Done(app.check(text))
             } catch (failure: CheckFailure) {
-                CardState.Failed(failure.reason)
+                CardState.Failed(failure.reason, failure.detail)
             }
         }
     }
