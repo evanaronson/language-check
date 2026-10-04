@@ -1,6 +1,7 @@
 package com.evanaronson.languagecheck
 
 import android.app.Application
+import com.evanaronson.languagecheck.check.CheckFailure
 import com.evanaronson.languagecheck.check.CheckResult
 import com.evanaronson.languagecheck.check.Checker
 import com.evanaronson.languagecheck.check.GeminiChecker
