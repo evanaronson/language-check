@@ -230,7 +230,7 @@ class ReviewTest {
         ).revision.acceptMatching(accepted)
 
         assertEquals("Hola, bebé, tomamos las cervezas que me ha traído de Montreal", second.workingText)
-        assertEquals(listOf("me ha traído" to "he traído"), second.remaining(EditKind.Fix).map { it.from to it.replacement })
+        assertEquals(listOf("me ha" to "he"), second.remaining(EditKind.Fix).map { it.from to it.replacement })
     }
 
     @Test
