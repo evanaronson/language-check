@@ -172,6 +172,23 @@ class ReviewTest {
     }
 
     @Test
+    fun strictSentenceBreaksAreAFullStopAndTheNewSentence() {
+        val revision = reviewed(
+            "estoy en el sofá y neo está en el suelo y tengo cosas que hacer",
+            Verdict(
+                status = Verdict.Status.Ok,
+                hasErrors = true,
+                corrected = "Estoy en el sofá, y Neo está en el suelo. Tengo cosas que hacer.",
+            ),
+        ).revision
+
+        assertEquals(
+            listOf("estoy" to "Estoy", "" to ",", "neo" to "Neo", "" to ".", "y tengo" to "Tengo", "" to "."),
+            revision.remaining(EditKind.Fix).map { it.from to it.replacement },
+        )
+    }
+
+    @Test
     fun replaceAllIsOneUndoStep() {
         val original = "hola q tal bb"
         val revision = reviewed(
