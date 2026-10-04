@@ -9,7 +9,12 @@ sealed interface CheckResult {
     data class WrongLanguage(val expected: String) : CheckResult
 
     /** Suggestions for the judgments that were asked for, in display order. */
-    data class Reviewed(val revision: Revision, val kinds: List<EditKind>) : CheckResult {
+    data class Reviewed(
+        val revision: Revision,
+        val kinds: List<EditKind>,
+        /** What the model assumed where the text was ambiguous. */
+        val assumptions: List<Assumption> = emptyList(),
+    ) : CheckResult {
         /** Nothing to suggest for any judgment that was made. */
         val looksGood get() = kinds.all { revision.edits(it).isEmpty() }
 
@@ -48,5 +53,6 @@ fun interpret(
     return CheckResult.Reviewed(
         Revision(original, fixes + naturals),
         kinds = EditKind.entries.filter { it in judgments.kinds },
+        assumptions = verdict.assumptions.filter { it.about.isNotBlank() && it.assumed.isNotBlank() },
     )
 }

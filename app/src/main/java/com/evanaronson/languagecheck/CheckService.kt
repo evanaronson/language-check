@@ -8,6 +8,7 @@ import com.evanaronson.languagecheck.review.CheckResult
 import com.evanaronson.languagecheck.review.Judgments
 import com.evanaronson.languagecheck.review.Language
 import com.evanaronson.languagecheck.review.Punctuation
+import com.evanaronson.languagecheck.review.Settled
 import com.evanaronson.languagecheck.review.interpret
 import com.evanaronson.languagecheck.settings.ApiKeys
 import com.evanaronson.languagecheck.settings.Settings
@@ -26,13 +27,16 @@ class CheckService(
     /** The chosen model for [provider], or its recommended one. */
     fun modelFor(provider: Provider) = settings.model(provider) ?: provider.recommendedModel
 
-    /** Checks [text] as [language], or lets the model detect the language when it's null. */
-    suspend fun check(text: String, language: Language?): CheckResult {
+    /**
+     * Checks [text] as [language], or lets the model detect the language when it's null.
+     * [settled] are the writer's answers to assumptions from an earlier check of the same text.
+     */
+    suspend fun check(text: String, language: Language?, settled: List<Settled> = emptyList()): CheckResult {
         if (text.length > MAX_CHARS) throw CheckFailure(CheckFailure.Reason.TooLong)
         return withContext(Dispatchers.IO) {
             val provider = settings.provider
             val judgments = settings.judgments
-            val request = CheckRequest(text, language, settings.punctuation, judgments)
+            val request = CheckRequest(text, language, settings.punctuation, judgments, settled)
             val verdict = clients.getValue(provider).check(key(provider), modelFor(provider), request)
             interpret(text, verdict, judgments, expectedLanguage = language?.name)
         }

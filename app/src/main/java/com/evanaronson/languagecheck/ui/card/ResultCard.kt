@@ -51,7 +51,7 @@ fun ResultCard(
                     is CardState.Loading -> Loading(state.text)
                     is CardState.Failed -> Failure(state.reason, state.detail, actions)
                     is CardState.Done -> when (val result = state.result) {
-                        is CheckResult.Reviewed -> ReviewContent(result, actions)
+                        is CheckResult.Reviewed -> ReviewContent(result, state.settled, actions)
                         CheckResult.Unclear -> Verdict(Mark.Unsure, "Can't tell what this means")
                         is CheckResult.WrongLanguage ->
                             Verdict(Mark.Unsure, "Not ${result.expected}", "Try Linguize to detect the language")

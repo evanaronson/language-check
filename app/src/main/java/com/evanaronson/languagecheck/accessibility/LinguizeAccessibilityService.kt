@@ -122,6 +122,7 @@ class LinguizeAccessibilityService :
                 onDone = done,
             ),
             onRetry = check::retry,
+            onSettle = check::settle,
             onOpenSettings = {
                 startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 close(field = null, fieldText = null, check = check)

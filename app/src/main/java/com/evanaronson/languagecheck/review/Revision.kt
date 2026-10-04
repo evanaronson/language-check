@@ -41,6 +41,21 @@ data class Revision(
 
     fun undo() = copy(steps = steps.dropLast(1))
 
+    /** The edits accepted so far. */
+    val acceptedEdits: List<Edit> get() = edits.filter { it.id in accepted }
+
+    /**
+     * Accepts, as one action, the edits identical to [previous] (same kind, span and
+     * replacement): after a re-check, what the writer had accepted stays accepted
+     * wherever the new suggestions didn't change.
+     */
+    fun acceptMatching(previous: List<Edit>): Revision {
+        val ids = edits.filter { edit ->
+            previous.any { it.kind == edit.kind && it.start == edit.start && it.end == edit.end && it.replacement == edit.replacement }
+        }.map { it.id }
+        return if (ids.isEmpty()) this else copy(steps = steps + listOf(ids))
+    }
+
     /** The text with accepted edits applied: what goes back to the app. */
     val workingText: String get() = render(original, edits.filter { it.id in accepted }).text
 

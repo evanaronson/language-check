@@ -50,6 +50,7 @@ class CheckActivity : ComponentActivity() {
                 )
             },
             onRetry = check::retry,
+            onSettle = check::settle,
             onOpenSettings = {
                 startActivity(Intent(this, MainActivity::class.java))
                 finish()

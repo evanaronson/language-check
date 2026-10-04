@@ -9,16 +9,22 @@ import androidx.lifecycle.viewModelScope
 import com.evanaronson.languagecheck.App
 import com.evanaronson.languagecheck.llm.CheckFailure
 import com.evanaronson.languagecheck.review.CheckResult
+import com.evanaronson.languagecheck.review.Edit
 import com.evanaronson.languagecheck.review.EditKind
 import com.evanaronson.languagecheck.review.Language
 import com.evanaronson.languagecheck.review.Revision
+import com.evanaronson.languagecheck.review.Settled
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 sealed interface CardState {
     data class Loading(val text: String) : CardState
     data class Failed(val reason: CheckFailure.Reason, val detail: String?) : CardState
-    data class Done(val result: CheckResult) : CardState
+    data class Done(
+        val result: CheckResult,
+        /** The writer's answers to assumptions, kept until the card closes. */
+        val settled: List<Settled> = emptyList(),
+    ) : CardState
 }
 
 /** One check and the changes the writer has accepted from it. */
@@ -26,6 +32,7 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
     private val checks = (application as App).checks
     private var text = ""
     private var language: Language? = null
+    private var settled: List<Settled> = emptyList()
     private var job: Job? = null
 
     /** Null before the first check and after [dismiss]. */
@@ -40,18 +47,40 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
     fun check(text: String, language: Language?) {
         this.text = text
         this.language = language
+        settled = emptyList()
+        run(keepAccepted = emptyList())
+    }
+
+    fun retry() = run(keepAccepted = emptyList())
+
+    /**
+     * Overrides an assumption with the writer's [answer] and checks again. Changes
+     * already accepted stay accepted wherever the new suggestions are the same.
+     */
+    fun settle(about: String, answer: String) {
+        val accepted = reviewed?.revision?.acceptedEdits.orEmpty()
+        settled = settled.filterNot { it.about == about } + Settled(about, answer)
+        run(keepAccepted = accepted)
+    }
+
+    private fun run(keepAccepted: List<Edit>) {
+        val settled = settled
         job?.cancel()
         state = CardState.Loading(text)
         job = viewModelScope.launch {
             state = try {
-                CardState.Done(checks.check(text, language))
+                val result = checks.check(text, language, settled)
+                val kept = if (result is CheckResult.Reviewed) {
+                    result.copy(revision = result.revision.acceptMatching(keepAccepted))
+                } else {
+                    result
+                }
+                CardState.Done(kept, settled)
             } catch (failure: CheckFailure) {
                 CardState.Failed(failure.reason, failure.detail)
             }
         }
     }
-
-    fun retry() = check(text, language)
 
     fun accept(id: Int) = update { it.accept(id) }
 
@@ -72,6 +101,7 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun update(change: (Revision) -> Revision) {
         val current = reviewed ?: return
-        state = CardState.Done(current.copy(revision = change(current.revision)))
+        val settled = (state as? CardState.Done)?.settled.orEmpty()
+        state = CardState.Done(current.copy(revision = change(current.revision)), settled)
     }
 }

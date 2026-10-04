@@ -9,8 +9,9 @@ Each case may set "language" (as the app's language setting names it; default
 auto), "punctuation" (strict, moderate or casual; default moderate), "checks"
 (both, fix or naturalize; default both), "status", "fix" (a correction is expected or not) and "natural" (a more
 natural alternative is expected or not) and "max_fixes" (more fixes than this
-means style is being counted as errors) and "min_sentences" (fewer means
-run-ons were left alone). Omitted fields aren't checked. "natural": false cases are the important ones: they catch the
+means style is being counted as errors) "min_sentences" (fewer means
+run-ons were left alone), "assumption" (whether any assumption should be listed)
+and "settled" ([about, answer] pairs sent as Settled lines). Omitted fields aren't checked. "natural": false cases are the important ones: they catch the
 app nagging about language that is already fine.
 """
 import argparse
@@ -104,7 +105,9 @@ def main():
         try:
             message = (f"Language: {case.get('language', 'auto')}\n"
                        f"Punctuation: {case.get('punctuation', 'moderate')}\n"
-                       f"Checks: {case.get('checks', 'both')}\nText: {case['text']}")
+                       f"Checks: {case.get('checks', 'both')}\n"
+                       + "".join(f"Settled: {about} → {answer}\n" for about, answer in case.get("settled", []))
+                       + f"Text: {case['text']}")
             verdict, elapsed = check(model, key, system, schema, message)
         except (urllib.error.URLError, KeyError, json.JSONDecodeError) as error:
             failures += 1
@@ -122,11 +125,15 @@ def main():
             sentences = sum(verdict.get("corrected", "").count(mark) for mark in ".?!")
             if sentences < case["min_sentences"]:
                 problems.append(f"{sentences} sentences < {case['min_sentences']} (run-ons left alone?)")
+        if "assumption" in case and bool(verdict.get("assumptions")) != case["assumption"]:
+            problems.append(f"assumptions {verdict.get('assumptions')} (expected {'some' if case['assumption'] else 'none'})")
         if "max_fixes" in case and len(verdict["fixes"]) > case["max_fixes"]:
             problems.append(f"{len(verdict['fixes'])} fixes > {case['max_fixes']} (style counted as errors?)")
         failures += bool(problems)
         mark = "MISS " if problems else "ok   "
         print(f"{mark}{elapsed:4.1f}s  {case['text']}")
+        for a in verdict.get("assumptions", []):
+            print(f"        assumed: {a['about']}: {a['assumed']}  (or {', '.join(a['alternatives'])})")
         if verdict.get("corrected"):
             print(f"            fix: {verdict['corrected']}")
             for change in verdict.get("fixes", []):

@@ -3,6 +3,7 @@ package com.evanaronson.languagecheck.llm
 import com.evanaronson.languagecheck.review.Judgments
 import com.evanaronson.languagecheck.review.Language
 import com.evanaronson.languagecheck.review.Punctuation
+import com.evanaronson.languagecheck.review.Settled
 import com.evanaronson.languagecheck.review.Verdict
 
 /** What a check asks of the model; [Prompt] turns it into the user message. */
@@ -12,6 +13,8 @@ data class CheckRequest(
     val language: Language?,
     val punctuation: Punctuation,
     val judgments: Judgments,
+    /** The writer's answers to earlier assumptions. */
+    val settled: List<Settled> = emptyList(),
 )
 
 /** One provider's API. Every client sends the same [Prompt] and returns the same [Verdict]. */

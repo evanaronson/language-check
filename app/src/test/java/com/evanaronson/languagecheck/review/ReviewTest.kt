@@ -215,6 +215,25 @@ class ReviewTest {
     }
 
     @Test
+    fun acceptedChangesSurviveARecheckWhereTheyDidntChange() {
+        val original = "Hola bebé, tomamos las cervezas que me ha traído de Montreal"
+        val first = reviewed(
+            original,
+            Verdict(status = Verdict.Status.Ok, hasErrors = true, corrected = "Hola, bebé, tomamos las cervezas que me ha traído de Montreal"),
+        ).revision
+        val accepted = first.acceptAll(EditKind.Fix).acceptedEdits
+
+        // After settling "who brought the beers", the re-check adds a fix and keeps the comma.
+        val second = reviewed(
+            original,
+            Verdict(status = Verdict.Status.Ok, hasErrors = true, corrected = "Hola, bebé, tomamos las cervezas que he traído de Montreal"),
+        ).revision.acceptMatching(accepted)
+
+        assertEquals("Hola, bebé, tomamos las cervezas que me ha traído de Montreal", second.workingText)
+        assertEquals(listOf("me ha traído" to "he traído"), second.remaining(EditKind.Fix).map { it.from to it.replacement })
+    }
+
+    @Test
     fun replaceAllIsOneUndoStep() {
         val original = "hola q tal bb"
         val revision = reviewed(

@@ -9,6 +9,8 @@ class CardActions(
     val review: ReviewActions?,
     val onRetry: () -> Unit,
     val onOpenSettings: () -> Unit,
+    /** Overrides an assumption (by its "about") with the writer's answer and checks again. */
+    val onSettle: (about: String, answer: String) -> Unit,
 )
 
 class ReviewActions(

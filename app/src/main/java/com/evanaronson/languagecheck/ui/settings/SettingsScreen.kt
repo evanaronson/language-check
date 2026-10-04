@@ -296,6 +296,7 @@ private fun TryItSection(menu: Set<MenuEntry>, check: CheckViewModel) {
                     onDone = ::applyAndClose,
                 ),
                 onRetry = check::retry,
+                onSettle = check::settle,
                 onOpenSettings = {},
             ),
             modifier = Modifier.fillMaxWidth(),

@@ -25,6 +25,8 @@ Fixes and rewordings are both worked out against the original text, so they're i
 
 The selection menu can show several entries: **Linguize** (detects the language), **Catalanize** and **Castilianize**. Pick which ones appear in settings; tapping one checks the text as that language. Each entry is an `activity-alias` of `CheckActivity` in the manifest, switched on and off by `SelectionMenu`; adding a language means a `Language`, a `MenuEntry`, an alias and a label.
 
+Where the text is genuinely ambiguous (who did something, when, who's speaking), the card notes what it assumed behind a small "N assumptions" chip. Each is presented as right; "Not right" offers alternatives, and picking one checks again with that answer, keeping accepted changes that didn't move. Answers last until the card closes.
+
 Apps that don't show the selection-menu entries (Telegram, for example) can use the Linguize **accessibility button** instead: tap it while typing and the same card floats over the app, with language chips for the enabled entries; accepted changes are written back into the text field. The service (`accessibility/`) reads the focused field only when the button is tapped. Setup, once: App info → ⋮ → Allow restricted settings, then Accessibility → Linguize.
 
 Settings also has a punctuation level (Strict, Moderate or Casual), which judgments to make (fix, naturalize or both), and a model picker that lists the models your key can use, live from the provider. Picking a model runs a short test check and shows how long it took, or the provider's error.

@@ -18,10 +18,15 @@ import androidx.compose.ui.unit.dp
 import com.evanaronson.languagecheck.review.CheckResult
 import com.evanaronson.languagecheck.review.EditKind
 import com.evanaronson.languagecheck.review.Revision
+import com.evanaronson.languagecheck.review.Settled
 
-/** One section per judgment, then Undo and Done once something has been accepted. */
+/** Any assumptions, one section per judgment, then Undo and Done once something has been accepted. */
 @Composable
-internal fun ReviewContent(result: CheckResult.Reviewed, actions: CardActions) {
+internal fun ReviewContent(result: CheckResult.Reviewed, settled: List<Settled>, actions: CardActions) {
+    if (result.assumptions.isNotEmpty() || settled.isNotEmpty()) {
+        AssumptionsPanel(result.assumptions, settled, actions.onSettle)
+        Spacer(Modifier.height(12.dp))
+    }
     if (result.looksGood) {
         val checked = result.kinds.map { if (it == EditKind.Fix) "No fixes" else "Sounds natural" }
         Verdict(Mark.Good, "Looks good", checked.joinToString(" · "))

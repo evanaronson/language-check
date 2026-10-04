@@ -25,6 +25,7 @@ class Prompt(val system: String, schemaJson: String) {
         appendLine("Language: $language")
         appendLine("Punctuation: ${token(request.punctuation)}")
         appendLine("Checks: ${token(request.judgments)}")
+        request.settled.forEach { appendLine("Settled: ${it.about} → ${it.answer}") }
         append("Text: ${request.text}")
     }
 
