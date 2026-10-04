@@ -25,10 +25,12 @@ Later builds install over the previous one because they're all signed with the s
 | Instructions and output schema sent to the model | `app/src/main/assets/check_prompt.md`, `check_schema.json` |
 | Gemini call (plain REST, `gemini-3.5-flash-lite`, minimal thinking) | `check/GeminiChecker.kt` |
 | OpenAI call (Responses API, `gpt-6-sol`, no reasoning) | `check/OpenAIChecker.kt` |
-| Turning the verdict into card states, plus the word diff behind "1 fix" and highlights | `check/CheckResult.kt`, `check/WordDiff.kt` |
+| Turning the verdict into edits anchored to the original, and tracking which are accepted | `check/CheckResult.kt`, `check/Edits.kt`, `check/Revision.kt` |
 | Provider choice and API keys, encrypted with an Android Keystore key | `KeyStorage.kt`, `MainActivity.kt` |
 
-Possible results: **Looks good** (no fixes, sounds natural); fixes and/or a more natural alternative, each change highlighted separately (tap one for the reason); **Can't tell what this means**; **Not <language>** when a language is pinned in settings; or an error with Retry.
+Possible results: **Looks good**; fixes and/or a more natural rewording, each change highlighted separately; **Can't tell what this means**; **Not <language>** when a language is pinned in settings; or an error with Retry.
+
+Fixes and rewordings are both worked out against the original text, so they're independent: tap a highlight to see why and **Replace** just that change, or **Replace all** for a whole section. Accepted changes disappear from the list; **Undo** reverts the last one, and closing the card in any way (Done, back, tapping outside) hands the text with accepted changes back to the app. Positions come from aligning the original with the model's full corrected and natural texts (`check/Edits.kt`), with every punctuation mark its own fix; the model's change list supplies the reasons. A rewording that covers a fixed word takes precedence over that fix (`check/Revision.kt`).
 
 Settings has a language picker (auto-detect by default, or pin Catalan or Spanish; add more in `Language.kt`), a punctuation level (Strict, Moderate by default, or Casual; defined in the prompt), which checks to run (fix, naturalize or both), and a model picker that lists the models your key can use, live from the provider, with the recommended model as the default. Picking a model runs a short test check and shows whether it works and how long it took, or the provider's error.
 

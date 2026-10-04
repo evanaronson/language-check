@@ -31,13 +31,13 @@ Question: what is the minimum change needed to make the writer's own text correc
 
 ## 3. Naturalness
 
-Question: independently of correctness, does the text (as corrected, if you corrected it) sound like something a native speaker would naturally write in this situation?
+Question: independently of correctness, does the writer's phrasing sound like something a native speaker would naturally write in this situation? Ignore spelling, grammar and punctuation errors here; step 2 handles those.
 
 - The bar is high. Offer an alternative only when it is clearly and usefully better: a calque from English, an expression natives would find odd, a construction that is correct but stilted. Do not offer one merely because a different phrasing is possible.
 - When in doubt, say it sounds natural. Telling a learner that valid, normal language is inadequate is a worse mistake than missing a small improvement.
-- If you offer an alternative, change as little as possible, keep the writer's meaning and register, include any corrections from step 2, and give exactly one alternative.
+- If you offer an alternative, work from the writer's original text, not the corrected one. Reword only the phrases that need it and leave everything else exactly as written, including any errors outside those phrases. A phrase you reword must itself be correct. Keep the writer's meaning and register, and give exactly one alternative.
 - If the text sounds reasonably natural, set `more_natural` to false, `natural` to an empty string and `natural_changes` to an empty list.
-- Otherwise set `more_natural` to true, `natural` to the full alternative text, and list each change from the corrected text in `natural_changes`, in order.
+- Otherwise set `more_natural` to true, `natural` to the writer's original text with only your rewordings applied, and list each rewording in `natural_changes`, in order, with `from` copied exactly from the original text.
 
 ## Listing changes
 
@@ -66,7 +66,7 @@ Language: auto
 Punctuation: moderate
 Checks: both
 Text: Bon dia! Com estas amb la pluja?
-{"status":"ok","language":"Catalan","has_errors":true,"corrected":"Bon dia! Com estàs amb la pluja?","fixes":[{"from":"estas","to":"estàs","context":"Com estàs amb","why":"Missing accent"}],"more_natural":true,"natural":"Bon dia! Com portes la pluja?","natural_changes":[{"from":"estàs amb","to":"portes","context":"Com portes la pluja","why":"Usual way to say it"}]}
+{"status":"ok","language":"Catalan","has_errors":true,"corrected":"Bon dia! Com estàs amb la pluja?","fixes":[{"from":"estas","to":"estàs","context":"Com estàs amb","why":"Missing accent"}],"more_natural":true,"natural":"Bon dia! Com portes la pluja?","natural_changes":[{"from":"estas amb","to":"portes","context":"Com portes la pluja","why":"Usual way to say it"}]}
 
 Language: Catalan (standard Central Catalan)
 Punctuation: moderate
@@ -79,6 +79,12 @@ Punctuation: moderate
 Checks: both
 Text: Voy a tomar una ducha y te llamo
 {"status":"ok","language":"Spanish","has_errors":false,"corrected":"","fixes":[],"more_natural":true,"natural":"Me voy a duchar y te llamo","natural_changes":[{"from":"Voy a tomar una ducha","to":"Me voy a duchar","context":"Me voy a duchar","why":"More usual in Spain"}]}
+
+Language: auto
+Punctuation: moderate
+Checks: both
+Text: Voy a tomar una ducha y te llamo despues
+{"status":"ok","language":"Spanish","has_errors":true,"corrected":"Voy a tomar una ducha y te llamo después","fixes":[{"from":"despues","to":"después","context":"te llamo después","why":"Missing accent"}],"more_natural":true,"natural":"Me voy a duchar y te llamo despues","natural_changes":[{"from":"Voy a tomar una ducha","to":"Me voy a duchar","context":"Me voy a duchar","why":"More usual in Spain"}]}
 
 Language: auto
 Punctuation: moderate

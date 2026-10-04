@@ -5,6 +5,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -29,16 +31,20 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import com.evanaronson.languagecheck.check.Change
+
+/** One change shown in the text: where it sits, what it replaced, and why. */
+data class Highlight(val id: Int, val range: IntRange, val from: String, val why: String?)
 
 /**
- * Suggestion text with a separate rounded highlight behind each change, so
- * adjacent changes read as distinct blocks. Tapping a highlight shows why.
+ * Suggested text with a separate rounded highlight behind each change, so
+ * adjacent changes read as distinct blocks. Tapping a highlight shows why,
+ * with a Replace button to accept just that change when [onReplace] is set.
  */
 @Composable
-fun HighlightedText(text: String, changes: List<Change>, accent: Color) {
+fun HighlightedText(text: String, changes: List<Highlight>, accent: Color, onReplace: ((Int) -> Unit)?) {
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    var selected by remember(text) { mutableStateOf<Int?>(null) }
+    var selectedId by remember { mutableStateOf<Int?>(null) }
+    val selected = changes.indexOfFirst { it.id == selectedId }.takeIf { it >= 0 }
 
     val annotated = remember(text, changes) {
         buildAnnotatedString {
@@ -82,8 +88,8 @@ fun HighlightedText(text: String, changes: List<Change>, accent: Color) {
                 .pointerInput(changes) {
                     detectTapGestures { position ->
                         val result = layout ?: return@detectTapGestures
-                        val hit = changes.indexOfFirst { characterAt(result, position) in it.range }
-                        selected = if (hit < 0 || hit == selected) null else hit
+                        val hit = changes.firstOrNull { characterAt(result, position) in it.range }
+                        selectedId = if (hit == null || hit.id == selectedId) null else hit.id
                     }
                 },
         )
@@ -93,21 +99,26 @@ fun HighlightedText(text: String, changes: List<Change>, accent: Color) {
             val change = shown ?: return@AnimatedVisibility
             Column {
                 Spacer(Modifier.height(8.dp))
-                Explanation(change, text.substring(change.range), accent)
+                Explanation(
+                    change,
+                    text.substring(change.range),
+                    accent,
+                    onReplace = onReplace?.let { replace -> { selectedId = null; replace(change.id) } },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun Explanation(change: Change, replacement: String, accent: Color) {
+private fun Explanation(change: Highlight, replacement: String, accent: Color, onReplace: (() -> Unit)?) {
     Surface(shape = MaterialTheme.shapes.medium, color = accent.copy(alpha = 0.12f)) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(
                     buildAnnotatedString {
                         val from = change.from
-                        if (from.isNullOrEmpty()) {
+                        if (from.isEmpty()) {
                             // Something added, like a comma.
                             append("+ ")
                         } else {
@@ -125,6 +136,10 @@ private fun Explanation(change: Change, replacement: String, accent: Color) {
                 change.why?.let {
                     Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+            }
+            if (onReplace != null) {
+                Spacer(Modifier.width(8.dp))
+                FilledTonalButton(onClick = onReplace) { Text("Replace") }
             }
         }
     }

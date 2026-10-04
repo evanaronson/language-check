@@ -1,152 +1,176 @@
 package com.evanaronson.languagecheck.check
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InterpretTest {
-    private val original = "Bon dia! Com estas amb la pluja?"
+    private fun feedback(original: String, verdict: ModelVerdict) =
+        interpret(original, verdict) as CheckResult.Feedback
+
+    private fun Revision.replacements(kind: EditKind) = remaining(kind).map { it.replacement }
 
     @Test
-    fun correctionAndNaturalAlternativeUseTheModelsChanges() {
-        val result = interpret(
-            original,
+    fun everyPunctuationMarkAndWordIsItsOwnFix() {
+        val original = "hola q tal bb estas bien te encanta esta musica no"
+        val corrected = "hola, q tal, bb? Estás bien? Te encanta esta música, no?"
+        val revision = feedback(original, ModelVerdict(status = "ok", has_errors = true, corrected = corrected)).revision
+
+        assertEquals(
+            listOf(",", ",", "?", "Estás", "?", "Te", "música", ",", "?"),
+            revision.replacements(EditKind.Fix),
+        )
+        assertEquals(corrected, revision.preview(EditKind.Fix).text)
+    }
+
+    @Test
+    fun reasonsComeFromTheModelsList() {
+        val revision = feedback(
+            "Com estas?",
             ModelVerdict(
                 status = "ok",
-                language = "Catalan",
                 has_errors = true,
-                corrected = "Bon dia! Com estàs amb la pluja?",
+                corrected = "Com estàs?",
                 fixes = listOf(ModelChange("estas", "estàs", why = "Missing accent")),
-                more_natural = true,
-                natural = "Bon dia! Com portes la pluja?",
-                natural_changes = listOf(ModelChange("estàs amb", "portes", why = "Usual way to say it")),
             ),
-        ) as CheckResult.Feedback
+        ).revision
 
-        val correction = result.correction!!
-        assertEquals(1, correction.edits)
-        val fix = correction.changes.single()
-        assertEquals("estàs", correction.text.substring(fix.range))
+        val fix = revision.remaining(EditKind.Fix).single()
         assertEquals("estas", fix.from)
         assertEquals("Missing accent", fix.why)
-        assertEquals("portes", result.natural!!.text.substring(result.natural!!.changes.single().range))
     }
 
     @Test
-    fun adjacentMistakesStaySeparate() {
-        val result = interpret(
-            "unes tomàquet bo",
+    fun fixesCanBeAcceptedInAnyOrderAndUndone() {
+        val original = "unes tomàquets molt bo"
+        val revision = feedback(
+            original,
+            ModelVerdict(status = "ok", has_errors = true, corrected = "uns tomàquets molt bons"),
+        ).revision
+        val (first, second) = revision.remaining(EditKind.Fix)
+
+        val secondOnly = revision.accept(second.id)
+        assertEquals("unes tomàquets molt bons", secondOnly.workingText)
+        assertEquals(listOf("uns"), secondOnly.replacements(EditKind.Fix))
+
+        val both = secondOnly.accept(first.id)
+        assertEquals("uns tomàquets molt bons", both.workingText)
+        assertTrue(both.remaining(EditKind.Fix).isEmpty())
+
+        assertEquals("unes tomàquets molt bons", both.undo().workingText)
+        assertEquals(original, both.undo().undo().workingText)
+    }
+
+    @Test
+    fun rewordingLeavesUnrelatedErrorsToTheFixes() {
+        val original = "Voy a tomar una ducha y te llamo despues"
+        val revision = feedback(
+            original,
             ModelVerdict(
                 status = "ok",
                 has_errors = true,
-                corrected = "uns tomàquets bons",
-                fixes = listOf(
-                    ModelChange("unes", "uns", why = "Masculine"),
-                    ModelChange("tomàquet", "tomàquets", why = "Plural"),
-                    ModelChange("bo", "bons", why = "Agreement"),
-                ),
+                corrected = "Voy a tomar una ducha y te llamo después",
+                more_natural = true,
+                natural = "Me voy a duchar y te llamo despues",
+                natural_changes = listOf(ModelChange("Voy a tomar una ducha", "Me voy a duchar", why = "More usual")),
             ),
-        ) as CheckResult.Feedback
+        ).revision
 
-        val correction = result.correction!!
-        assertEquals(3, correction.edits)
-        assertEquals(listOf("uns", "tomàquets", "bons"), correction.changes.map { correction.text.substring(it.range) })
+        val natural = revision.remaining(EditKind.Natural).single()
+        assertEquals("Voy a tomar una ducha", natural.from)
+        assertEquals("More usual", natural.why)
+
+        val reworded = revision.accept(natural.id)
+        assertEquals("Me voy a duchar y te llamo despues", reworded.workingText)
+        // The accent fix is elsewhere, so it's still on offer.
+        assertEquals(listOf("después"), reworded.replacements(EditKind.Fix))
+        assertEquals("Me voy a duchar y te llamo después", reworded.preview(EditKind.Fix).text)
     }
 
     @Test
-    fun fallsBackToTheWordDiffWhenChangesCantBeLocated() {
-        val result = interpret(
+    fun acceptingARewordingRetiresFixesInsideIt() {
+        val original = "Bon dia! Com estas amb la pluja?"
+        val revision = feedback(
             original,
             ModelVerdict(
                 status = "ok",
                 has_errors = true,
                 corrected = "Bon dia! Com estàs amb la pluja?",
-                fixes = listOf(ModelChange("x", "not in the text", why = "?")),
+                more_natural = true,
+                natural = "Bon dia! Com portes la pluja?",
+                natural_changes = listOf(ModelChange("estas amb", "portes", why = "Usual way to say it")),
             ),
-        ) as CheckResult.Feedback
+        ).revision
+        val fix = revision.remaining(EditKind.Fix).single()
+        val natural = revision.remaining(EditKind.Natural).single()
 
-        val change = result.correction!!.changes.single()
-        assertEquals("estàs", result.correction!!.text.substring(change.range))
-        assertNull(change.why)
+        // Rewording first: the fix inside it disappears.
+        val reworded = revision.accept(natural.id)
+        assertEquals("Bon dia! Com portes la pluja?", reworded.workingText)
+        assertTrue(reworded.remaining(EditKind.Fix).isEmpty())
+
+        // Fix first, then rewording: same result.
+        val fixedThenReworded = revision.accept(fix.id).accept(natural.id)
+        assertEquals("Bon dia! Com portes la pluja?", fixedThenReworded.workingText)
+
+        // Undoing the rewording brings the accepted fix back into effect.
+        assertEquals("Bon dia! Com estàs amb la pluja?", fixedThenReworded.undo().workingText)
     }
 
     @Test
-    fun changesMatchWholeWordsBeforePartsOfWords() {
-        val result = interpret(
-            "tambien esta bien",
-            ModelVerdict(
-                status = "ok",
-                has_errors = true,
-                corrected = "también está bien",
-                fixes = listOf(ModelChange("esta", "está", why = "Verb needs accent"), ModelChange("tambien", "también", why = "Accent")),
-            ),
-        ) as CheckResult.Feedback
+    fun replaceAllIsOneUndoStep() {
+        val original = "hola q tal bb"
+        val revision = feedback(
+            original,
+            ModelVerdict(status = "ok", has_errors = true, corrected = "hola, q tal, bb?"),
+        ).revision
 
-        val correction = result.correction!!
-        assertEquals(listOf("también", "está"), correction.changes.map { correction.text.substring(it.range) })
+        val all = revision.acceptAll(EditKind.Fix)
+        assertEquals("hola, q tal, bb?", all.workingText)
+        assertEquals(original, all.undo().workingText)
+        assertFalse(all.undo().canUndo)
     }
 
     @Test
-    fun punctuationFixesAreSeparateHighlights() {
-        val result = interpret(
-            "Hola qué tal bb estás bien",
-            ModelVerdict(
-                status = "ok",
-                has_errors = true,
-                corrected = "Hola, ¿qué tal, bb? ¿Estás bien?",
-                fixes = listOf(
-                    ModelChange("Hola qué", "Hola, ¿qué", why = "Comma, then open the question"),
-                    ModelChange("tal bb", "tal, bb?", why = "Comma before name; close question"),
-                    ModelChange("estás", "¿Estás", why = "New question"),
-                    ModelChange("bien", "bien?", why = "Close question"),
-                ),
-            ),
-        ) as CheckResult.Feedback
+    fun deletedWordsAreShownWithTheirNeighbour() {
+        val revision = feedback(
+            "Ayer yo fui a la playa",
+            ModelVerdict(status = "ok", has_errors = true, corrected = "Ayer fui a la playa"),
+        ).revision
 
-        val correction = result.correction!!
-        assertEquals(4, correction.edits)
-        assertEquals(
-            listOf("Hola, ¿qué", "tal, bb?", "¿Estás", "bien?"),
-            correction.changes.map { correction.text.substring(it.range) },
-        )
+        val fix = revision.remaining(EditKind.Fix).single()
+        assertEquals("yo fui", fix.from)
+        assertEquals("fui", fix.replacement)
     }
 
     @Test
-    fun eachPunctuationMarkIsItsOwnChange() {
-        val result = interpret(
-            "te encanta esta musica no",
-            ModelVerdict(
-                status = "ok",
-                has_errors = true,
-                corrected = "te encanta esta música, no?",
-                fixes = listOf(
-                    ModelChange("musica", "música", context = "esta música, no?", why = "Missing accent"),
-                    ModelChange("", ",", context = "música, no?", why = "Comma before a tag question"),
-                    ModelChange("", "?", context = "música, no?", why = "End of question"),
-                ),
-            ),
-        ) as CheckResult.Feedback
+    fun insertedWordsDontCarryTheSpaceIntoTheHighlight() {
+        val revision = feedback(
+            "Ahir vaig mercat",
+            ModelVerdict(status = "ok", has_errors = true, corrected = "Ahir vaig al mercat"),
+        ).revision
 
-        val correction = result.correction!!
-        assertEquals(3, correction.edits)
-        assertEquals(listOf("música", ",", "?"), correction.changes.map { correction.text.substring(it.range) })
-        assertEquals(listOf(16, 22, 26), correction.changes.map { it.range.first })
-        assertEquals("", correction.changes[1].from)
+        val fix = revision.remaining(EditKind.Fix).single()
+        val preview = revision.preview(EditKind.Fix)
+        assertEquals("Ahir vaig al mercat", preview.text)
+        assertEquals("al ", preview.text.substring(preview.ranges.getValue(fix.id)))
     }
 
     @Test
-    fun onlyRequestedJudgmentsAreShown() {
+    fun onlyRequestedJudgmentsBecomeEdits() {
+        val original = "Com estas amb la pluja?"
         val verdict = ModelVerdict(
             status = "ok",
             has_errors = true,
-            corrected = "Bon dia! Com estàs amb la pluja?",
+            corrected = "Com estàs amb la pluja?",
             more_natural = true,
-            natural = "Bon dia! Com portes la pluja?",
+            natural = "Com portes la pluja?",
         )
         val fixOnly = interpret(original, verdict, checkNaturalness = false) as CheckResult.Feedback
-        assertNull(fixOnly.natural)
+        assertTrue(fixOnly.revision.edits(EditKind.Natural).isEmpty())
         val naturalOnly = interpret(original, verdict, checkFixes = false) as CheckResult.Feedback
-        assertNull(naturalOnly.correction)
+        assertTrue(naturalOnly.revision.edits(EditKind.Fix).isEmpty())
         assertEquals(
             CheckResult.AllGood(checkedFixes = true, checkedNaturalness = false),
             interpret(original, verdict.copy(has_errors = false), checkNaturalness = false),
@@ -154,28 +178,10 @@ class InterpretTest {
     }
 
     @Test
-    fun nothingToSayIsAllGood() {
-        val verdict = ModelVerdict(status = "ok", language = "Catalan")
-        assertEquals(CheckResult.AllGood(true, true), interpret("Ens veiem demà a les set?", verdict))
-    }
-
-    @Test
-    fun aCorrectionIdenticalToTheOriginalIsNotAFix() {
-        val verdict = ModelVerdict(
-            status = "ok", has_errors = true, corrected = " $original ",
-            fixes = listOf(ModelChange("estas", "estas", why = "?")),
-        )
+    fun aCorrectionIdenticalToTheOriginalIsAllGood() {
+        val original = "Ens veiem demà a les set?"
+        val verdict = ModelVerdict(status = "ok", has_errors = true, corrected = " $original ")
         assertEquals(CheckResult.AllGood(true, true), interpret(original, verdict))
-    }
-
-    @Test
-    fun naturalAlternativeIdenticalToTheCorrectionIsDropped() {
-        val fixed = "Bon dia! Com estàs amb la pluja?"
-        val verdict = ModelVerdict(
-            status = "ok", has_errors = true, corrected = fixed, more_natural = true, natural = fixed,
-        )
-        val result = interpret(original, verdict) as CheckResult.Feedback
-        assertNull(result.natural)
     }
 
     @Test

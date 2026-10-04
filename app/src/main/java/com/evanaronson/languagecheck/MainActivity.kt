@@ -359,7 +359,8 @@ private fun Settings(app: App) {
                         context.getSystemService(ClipboardManager::class.java)
                             .setPrimaryClip(ClipData.newPlainText("Linguize", it))
                     },
-                    onReplace = { sample = it },
+                    onWorkingText = { sample = it },
+                    onDone = { result = null },
                     onRetry = ::runCheck,
                     onOpenSettings = {},
                 ),

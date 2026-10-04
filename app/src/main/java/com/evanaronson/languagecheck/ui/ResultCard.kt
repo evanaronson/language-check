@@ -21,15 +21,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.evanaronson.languagecheck.check.CheckFailure
 import com.evanaronson.languagecheck.check.CheckResult
-import com.evanaronson.languagecheck.check.Suggestion
+import com.evanaronson.languagecheck.check.EditKind
+import com.evanaronson.languagecheck.check.Revision
 
 sealed interface CardState {
     data object Loading : CardState
@@ -39,8 +44,13 @@ sealed interface CardState {
 
 class CardActions(
     val onCopy: (String) -> Unit,
-    /** Null when the selected text can't be replaced (read-only selection). */
-    val onReplace: ((String) -> Unit)?,
+    /**
+     * Receives the text with accepted changes whenever that changes; it goes back
+     * to the app when the card closes. Null when the selected text can't be replaced.
+     */
+    val onWorkingText: ((String) -> Unit)?,
+    /** Closes the card, handing back the accepted changes. */
+    val onDone: () -> Unit,
     val onRetry: () -> Unit,
     val onOpenSettings: () -> Unit,
 )
@@ -121,42 +131,95 @@ private fun Result(result: CheckResult, actions: CardActions) {
 
 @Composable
 private fun Feedback(result: CheckResult.Feedback, actions: CardActions) {
-    if (result.checkedFixes) {
-        val correction = result.correction
-        if (correction == null) {
-            StatusLine(Mark.Good, "No fixes")
-        } else {
-            val label = if (correction.edits == 1) "1 fix" else "${correction.edits} fixes"
-            SuggestionBlock(label, correction, MaterialTheme.colorScheme.error, actions)
+    var revision by remember(result) { mutableStateOf(result.revision) }
+    val editable = actions.onWorkingText != null
+    val kinds = listOfNotNull(
+        EditKind.Fix.takeIf { result.checkedFixes },
+        EditKind.Natural.takeIf { result.checkedNaturalness },
+    )
+
+    fun update(next: Revision) {
+        revision = next
+        actions.onWorkingText?.invoke(next.workingText)
+    }
+
+    kinds.forEachIndexed { index, kind ->
+        if (index > 0) {
+            Spacer(Modifier.height(14.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(Modifier.height(14.dp))
         }
+        EditSection(
+            kind = kind,
+            revision = revision,
+            onCopy = actions.onCopy,
+            onReplace = if (editable) {
+                { id -> update(revision.accept(id)) }
+            } else {
+                null
+            },
+            onReplaceAll = if (editable) {
+                {
+                    val next = revision.acceptAll(kind)
+                    update(next)
+                    // Nothing left to decide: hand the text back.
+                    if (kinds.all { next.remaining(it).isEmpty() }) actions.onDone()
+                }
+            } else {
+                null
+            },
+        )
     }
 
-    if (result.checkedFixes && result.checkedNaturalness) {
-        Spacer(Modifier.height(14.dp))
+    if (editable && revision.canUndo) {
+        Spacer(Modifier.height(12.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        Spacer(Modifier.height(14.dp))
-    }
-
-    if (result.checkedNaturalness) {
-        val natural = result.natural
-        if (natural == null) {
-            StatusLine(Mark.Good, "Sounds natural")
-        } else {
-            SuggestionBlock("More natural", natural, MaterialTheme.colorScheme.primary, actions)
+        Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            val count = revision.acceptedCount
+            Text(
+                if (count == 1) "1 change applied" else "$count changes applied",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { update(revision.undo()) }) { Text("Undo") }
+            FilledTonalButton(onClick = actions.onDone) { Text("Done") }
         }
     }
 }
 
 @Composable
-private fun SuggestionBlock(label: String, suggestion: Suggestion, accent: Color, actions: CardActions) {
-    Text(label, style = MaterialTheme.typography.labelLarge, color = accent)
-    Spacer(Modifier.height(6.dp))
-    HighlightedText(suggestion.text, suggestion.changes, accent)
-    Spacer(Modifier.height(10.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { actions.onCopy(suggestion.text) }) { Text("Copy") }
-        actions.onReplace?.let { replace ->
-            FilledTonalButton(onClick = { replace(suggestion.text) }) { Text("Replace") }
+private fun EditSection(
+    kind: EditKind,
+    revision: Revision,
+    onCopy: (String) -> Unit,
+    onReplace: ((Int) -> Unit)?,
+    onReplaceAll: (() -> Unit)?,
+) {
+    val fix = kind == EditKind.Fix
+    val remaining = revision.remaining(kind)
+    when {
+        revision.edits(kind).isEmpty() -> StatusLine(Mark.Good, if (fix) "No fixes" else "Sounds natural")
+        remaining.isEmpty() -> StatusLine(Mark.Good, if (fix) "Fixes applied" else "Rewording applied")
+        else -> {
+            val accent = if (fix) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+            val label = when {
+                !fix -> "More natural"
+                remaining.size == 1 -> "1 fix"
+                else -> "${remaining.size} fixes"
+            }
+            val preview = revision.preview(kind)
+            val highlights = remaining.mapNotNull { edit ->
+                preview.ranges[edit.id]?.let { Highlight(edit.id, it, edit.from, edit.why) }
+            }
+            Text(label, style = MaterialTheme.typography.labelLarge, color = accent)
+            Spacer(Modifier.height(6.dp))
+            HighlightedText(preview.text, highlights, accent, onReplace)
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onCopy(preview.text) }) { Text("Copy") }
+                onReplaceAll?.let { FilledTonalButton(onClick = it) { Text("Replace all") } }
+            }
         }
     }
 }

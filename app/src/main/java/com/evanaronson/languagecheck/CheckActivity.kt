@@ -44,6 +44,9 @@ class CheckActivity : ComponentActivity() {
     private var job: Job? = null
     private lateinit var text: String
 
+    /** The text with the changes accepted so far; sent back to the app when the card closes. */
+    private var workingText: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()?.trim().orEmpty()
@@ -58,7 +61,12 @@ class CheckActivity : ComponentActivity() {
 
         val actions = CardActions(
             onCopy = ::copy,
-            onReplace = if (readOnly) null else ::replace,
+            onWorkingText = if (readOnly) {
+                null
+            } else {
+                { working -> workingText = working }
+            },
+            onDone = ::finish,
             onRetry = ::startCheck,
             onOpenSettings = {
                 startActivity(Intent(this, MainActivity::class.java))
@@ -103,6 +111,7 @@ class CheckActivity : ComponentActivity() {
 
     private fun startCheck() {
         job?.cancel()
+        workingText = null
         state = CardState.Loading
         val app = application as App
         job = lifecycleScope.launch {
@@ -124,8 +133,12 @@ class CheckActivity : ComponentActivity() {
         finish()
     }
 
-    private fun replace(value: String) {
-        setResult(RESULT_OK, Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, value))
-        finish()
+    /** However the card closes (Done, back, tapping outside, Copy), accepted changes go back to the app. */
+    override fun finish() {
+        val result = workingText
+        if (result != null && result != text) {
+            setResult(RESULT_OK, Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, result))
+        }
+        super.finish()
     }
 }
