@@ -4,8 +4,6 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -47,6 +45,7 @@ import com.evanaronson.languagecheck.ui.card.CheckViewModel
 import com.evanaronson.languagecheck.ui.card.ResultCard
 import com.evanaronson.languagecheck.ui.card.ReviewActions
 import com.evanaronson.languagecheck.ui.components.Dropdown
+import com.evanaronson.languagecheck.ui.components.LanguagePicker
 import com.evanaronson.languagecheck.ui.components.MultiSelectDropdown
 import com.evanaronson.languagecheck.ui.components.RadioRow
 import com.evanaronson.languagecheck.ui.components.SectionTitle
@@ -73,7 +72,7 @@ fun SettingsScreen(settings: SettingsViewModel, check: CheckViewModel) {
         CheckingSection(state, settings)
         ModelSection(state, settings)
         OtherAppsSection()
-        TryItSection(state.menu, check)
+        TryItSection(check)
     }
 }
 
@@ -261,9 +260,8 @@ private fun OtherAppsSection() {
 }
 
 /** A text box and the same card the selection menu shows, so checks can be tried here. */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TryItSection(menu: Set<MenuEntry>, check: CheckViewModel) {
+private fun TryItSection(check: CheckViewModel) {
     val context = LocalContext.current
     var sample by rememberSaveable { mutableStateOf(SAMPLE) }
 
@@ -274,13 +272,11 @@ private fun TryItSection(menu: Set<MenuEntry>, check: CheckViewModel) {
 
     SectionTitle("Try it")
     OutlinedTextField(value = sample, onValueChange = { sample = it }, modifier = Modifier.fillMaxWidth(), minLines = 2)
-    // One button per selection-menu entry, so a check here works exactly like one from the menu.
-    val labels = menuLabels()
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        MenuEntry.entries.filter { it in menu }.forEach { entry ->
-            Button(onClick = { sample.trim().takeIf { it.isNotEmpty() }?.let { check.check(it, entry.language) } }) {
-                Text(labels.getValue(entry))
-            }
+    var entry by rememberSaveable { mutableStateOf(MenuEntry.Auto) }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+        LanguagePicker(entry, onSelect = { entry = it })
+        Button(onClick = { sample.trim().takeIf { it.isNotEmpty() }?.let { check.check(it, entry.language) } }) {
+            Text("Check")
         }
     }
 

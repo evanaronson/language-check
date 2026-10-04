@@ -9,18 +9,11 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -42,6 +35,7 @@ import com.evanaronson.languagecheck.ui.card.CardActions
 import com.evanaronson.languagecheck.ui.card.CheckViewModel
 import com.evanaronson.languagecheck.ui.card.FloatingCard
 import com.evanaronson.languagecheck.ui.card.ReviewActions
+import com.evanaronson.languagecheck.ui.components.LanguagePicker
 import com.evanaronson.languagecheck.ui.copyToClipboard
 
 /**
@@ -104,9 +98,8 @@ class LinguizeAccessibilityService :
         }
 
         val app = application as App
-        val entries = MenuEntry.entries.filter { it in app.menu.enabled() }.ifEmpty { listOf(MenuEntry.Auto) }
         val check = ViewModelProvider(this, ViewModelProvider.AndroidViewModelFactory.getInstance(app))[CheckViewModel::class.java]
-        var entry by mutableStateOf(entries.first())
+        var entry by mutableStateOf(MenuEntry.Auto)
         check.check(fieldText.text, entry.language)
 
         val done = { close(field, fieldText, check) }
@@ -138,12 +131,10 @@ class LinguizeAccessibilityService :
                     check.state?.let { state ->
                         // At the top, clear of the keyboard that's open for the field.
                         FloatingCard(state, actions, onDismiss = done, alignment = Alignment.TopCenter, topPadding = 32.dp) {
-                            if (entries.size > 1) {
-                                LanguageChips(entries, entry) {
-                                    entry = it
-                                    check.check(fieldText.text, it.language)
-                                }
-                            }
+                            LanguagePicker(entry, onSelect = {
+                                entry = it
+                                check.check(fieldText.text, it.language)
+                            })
                         }
                     }
                 }
@@ -190,21 +181,6 @@ class LinguizeAccessibilityService :
         } else {
             copyToClipboard(replacement)
             Toast.makeText(this, "This app didn't accept the change; it's copied instead", Toast.LENGTH_LONG).show()
-        }
-    }
-}
-
-/** Picks which language to check as, among the entries enabled for the selection menu. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun LanguageChips(entries: List<MenuEntry>, selected: MenuEntry, onSelect: (MenuEntry) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        entries.forEach { entry ->
-            FilterChip(
-                selected = entry == selected,
-                onClick = { onSelect(entry) },
-                label = { Text(stringResource(entry.label)) },
-            )
         }
     }
 }
