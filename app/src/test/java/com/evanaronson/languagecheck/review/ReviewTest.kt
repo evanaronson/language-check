@@ -1,13 +1,13 @@
-package com.evanaronson.languagecheck.check
+package com.evanaronson.languagecheck.review
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class InterpretTest {
-    private fun feedback(original: String, verdict: ModelVerdict) =
-        interpret(original, verdict) as CheckResult.Feedback
+class ReviewTest {
+    private fun reviewed(original: String, verdict: Verdict) =
+        interpret(original, verdict) as CheckResult.Reviewed
 
     private fun Revision.replacements(kind: EditKind) = remaining(kind).map { it.replacement }
 
@@ -15,7 +15,7 @@ class InterpretTest {
     fun everyPunctuationMarkAndWordIsItsOwnFix() {
         val original = "hola q tal bb estas bien te encanta esta musica no"
         val corrected = "hola, q tal, bb? Estás bien? Te encanta esta música, no?"
-        val revision = feedback(original, ModelVerdict(status = "ok", has_errors = true, corrected = corrected)).revision
+        val revision = reviewed(original, Verdict(status = Verdict.Status.Ok, hasErrors = true, corrected = corrected)).revision
 
         assertEquals(
             listOf(",", ",", "?", "Estás", "?", "Te", "música", ",", "?"),
@@ -26,13 +26,13 @@ class InterpretTest {
 
     @Test
     fun reasonsComeFromTheModelsList() {
-        val revision = feedback(
+        val revision = reviewed(
             "Com estas?",
-            ModelVerdict(
-                status = "ok",
-                has_errors = true,
+            Verdict(
+                status = Verdict.Status.Ok,
+                hasErrors = true,
                 corrected = "Com estàs?",
-                fixes = listOf(ModelChange("estas", "estàs", why = "Missing accent")),
+                fixes = listOf(VerdictChange("estas", "estàs", why = "Missing accent")),
             ),
         ).revision
 
@@ -44,9 +44,9 @@ class InterpretTest {
     @Test
     fun fixesCanBeAcceptedInAnyOrderAndUndone() {
         val original = "unes tomàquets molt bo"
-        val revision = feedback(
+        val revision = reviewed(
             original,
-            ModelVerdict(status = "ok", has_errors = true, corrected = "uns tomàquets molt bons"),
+            Verdict(status = Verdict.Status.Ok, hasErrors = true, corrected = "uns tomàquets molt bons"),
         ).revision
         val (first, second) = revision.remaining(EditKind.Fix)
 
@@ -65,15 +65,15 @@ class InterpretTest {
     @Test
     fun rewordingLeavesUnrelatedErrorsToTheFixes() {
         val original = "Voy a tomar una ducha y te llamo despues"
-        val revision = feedback(
+        val revision = reviewed(
             original,
-            ModelVerdict(
-                status = "ok",
-                has_errors = true,
+            Verdict(
+                status = Verdict.Status.Ok,
+                hasErrors = true,
                 corrected = "Voy a tomar una ducha y te llamo después",
-                more_natural = true,
+                moreNatural = true,
                 natural = "Me voy a duchar y te llamo despues",
-                natural_changes = listOf(ModelChange("Voy a tomar una ducha", "Me voy a duchar", why = "More usual")),
+                naturalChanges = listOf(VerdictChange("Voy a tomar una ducha", "Me voy a duchar", why = "More usual")),
             ),
         ).revision
 
@@ -91,15 +91,15 @@ class InterpretTest {
     @Test
     fun acceptingARewordingRetiresFixesInsideIt() {
         val original = "Bon dia! Com estas amb la pluja?"
-        val revision = feedback(
+        val revision = reviewed(
             original,
-            ModelVerdict(
-                status = "ok",
-                has_errors = true,
+            Verdict(
+                status = Verdict.Status.Ok,
+                hasErrors = true,
                 corrected = "Bon dia! Com estàs amb la pluja?",
-                more_natural = true,
+                moreNatural = true,
                 natural = "Bon dia! Com portes la pluja?",
-                natural_changes = listOf(ModelChange("estas amb", "portes", why = "Usual way to say it")),
+                naturalChanges = listOf(VerdictChange("estas amb", "portes", why = "Usual way to say it")),
             ),
         ).revision
         val fix = revision.remaining(EditKind.Fix).single()
@@ -121,9 +121,9 @@ class InterpretTest {
     @Test
     fun replaceAllIsOneUndoStep() {
         val original = "hola q tal bb"
-        val revision = feedback(
+        val revision = reviewed(
             original,
-            ModelVerdict(status = "ok", has_errors = true, corrected = "hola, q tal, bb?"),
+            Verdict(status = Verdict.Status.Ok, hasErrors = true, corrected = "hola, q tal, bb?"),
         ).revision
 
         val all = revision.acceptAll(EditKind.Fix)
@@ -134,9 +134,9 @@ class InterpretTest {
 
     @Test
     fun deletedWordsAreShownWithTheirNeighbour() {
-        val revision = feedback(
+        val revision = reviewed(
             "Ayer yo fui a la playa",
-            ModelVerdict(status = "ok", has_errors = true, corrected = "Ayer fui a la playa"),
+            Verdict(status = Verdict.Status.Ok, hasErrors = true, corrected = "Ayer fui a la playa"),
         ).revision
 
         val fix = revision.remaining(EditKind.Fix).single()
@@ -146,9 +146,9 @@ class InterpretTest {
 
     @Test
     fun insertedWordsDontCarryTheSpaceIntoTheHighlight() {
-        val revision = feedback(
+        val revision = reviewed(
             "Ahir vaig mercat",
-            ModelVerdict(status = "ok", has_errors = true, corrected = "Ahir vaig al mercat"),
+            Verdict(status = Verdict.Status.Ok, hasErrors = true, corrected = "Ahir vaig al mercat"),
         ).revision
 
         val fix = revision.remaining(EditKind.Fix).single()
@@ -160,38 +160,57 @@ class InterpretTest {
     @Test
     fun onlyRequestedJudgmentsBecomeEdits() {
         val original = "Com estas amb la pluja?"
-        val verdict = ModelVerdict(
-            status = "ok",
-            has_errors = true,
+        val verdict = Verdict(
+            status = Verdict.Status.Ok,
+            hasErrors = true,
             corrected = "Com estàs amb la pluja?",
-            more_natural = true,
+            moreNatural = true,
             natural = "Com portes la pluja?",
         )
-        val fixOnly = interpret(original, verdict, checkNaturalness = false) as CheckResult.Feedback
+        val fixOnly = interpret(original, verdict, Judgments.FixOnly) as CheckResult.Reviewed
+        assertEquals(listOf(EditKind.Fix), fixOnly.kinds)
         assertTrue(fixOnly.revision.edits(EditKind.Natural).isEmpty())
-        val naturalOnly = interpret(original, verdict, checkFixes = false) as CheckResult.Feedback
+
+        val naturalOnly = interpret(original, verdict, Judgments.NaturalizeOnly) as CheckResult.Reviewed
+        assertEquals(listOf(EditKind.Natural), naturalOnly.kinds)
         assertTrue(naturalOnly.revision.edits(EditKind.Fix).isEmpty())
-        assertEquals(
-            CheckResult.AllGood(checkedFixes = true, checkedNaturalness = false),
-            interpret(original, verdict.copy(has_errors = false), checkNaturalness = false),
-        )
+
+        val nothingToFix = interpret(original, verdict.copy(hasErrors = false), Judgments.FixOnly) as CheckResult.Reviewed
+        assertTrue(nothingToFix.looksGood)
     }
 
     @Test
-    fun aCorrectionIdenticalToTheOriginalIsAllGood() {
+    fun aCorrectionIdenticalToTheOriginalLooksGood() {
         val original = "Ens veiem demà a les set?"
-        val verdict = ModelVerdict(status = "ok", has_errors = true, corrected = " $original ")
-        assertEquals(CheckResult.AllGood(true, true), interpret(original, verdict))
+        val verdict = Verdict(status = Verdict.Status.Ok, hasErrors = true, corrected = " $original ")
+        assertTrue((interpret(original, verdict) as CheckResult.Reviewed).looksGood)
+    }
+
+    @Test
+    fun resolvedOnceEverySuggestionIsAcceptedOrOvertaken() {
+        val result = interpret(
+            "Bon dia! Com estas amb la pluja?",
+            Verdict(
+                status = Verdict.Status.Ok,
+                hasErrors = true,
+                corrected = "Bon dia! Com estàs amb la pluja?",
+                moreNatural = true,
+                natural = "Bon dia! Com portes la pluja?",
+            ),
+        ) as CheckResult.Reviewed
+        assertFalse(result.isResolved)
+        val reworded = result.copy(revision = result.revision.acceptAll(EditKind.Natural))
+        assertTrue(reworded.isResolved)
     }
 
     @Test
     fun unclearAndWrongLanguage() {
-        assertEquals(CheckResult.Unclear, interpret("x", ModelVerdict(status = "unclear")))
+        assertEquals(CheckResult.Unclear, interpret("x", Verdict(status = Verdict.Status.Unclear)))
         assertEquals(
             CheckResult.WrongLanguage("Catalan"),
-            interpret("x", ModelVerdict(status = "wrong_language"), expectedLanguage = "Catalan"),
+            interpret("x", Verdict(status = Verdict.Status.WrongLanguage), expectedLanguage = "Catalan"),
         )
         // Without a chosen language there's nothing to be wrong about.
-        assertEquals(CheckResult.Unclear, interpret("x", ModelVerdict(status = "wrong_language")))
+        assertEquals(CheckResult.Unclear, interpret("x", Verdict(status = Verdict.Status.WrongLanguage)))
     }
 }

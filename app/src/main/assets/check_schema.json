@@ -9,9 +9,6 @@
         "wrong_language"
       ]
     },
-    "language": {
-      "type": "string"
-    },
     "has_errors": {
       "type": "boolean"
     },
@@ -29,9 +26,6 @@
           "to": {
             "type": "string"
           },
-          "context": {
-            "type": "string"
-          },
           "why": {
             "type": "string"
           }
@@ -39,7 +33,6 @@
         "required": [
           "from",
           "to",
-          "context",
           "why"
         ],
         "additionalProperties": false
@@ -62,9 +55,6 @@
           "to": {
             "type": "string"
           },
-          "context": {
-            "type": "string"
-          },
           "why": {
             "type": "string"
           }
@@ -72,7 +62,6 @@
         "required": [
           "from",
           "to",
-          "context",
           "why"
         ],
         "additionalProperties": false
@@ -81,7 +70,6 @@
   },
   "required": [
     "status",
-    "language",
     "has_errors",
     "corrected",
     "fixes",
@@ -92,7 +80,6 @@
   "additionalProperties": false,
   "propertyOrdering": [
     "status",
-    "language",
     "has_errors",
     "corrected",
     "fixes",

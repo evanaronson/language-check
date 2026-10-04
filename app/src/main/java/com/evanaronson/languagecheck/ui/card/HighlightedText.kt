@@ -1,4 +1,4 @@
-package com.evanaronson.languagecheck.ui
+package com.evanaronson.languagecheck.ui.card
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.gestures.detectTapGestures

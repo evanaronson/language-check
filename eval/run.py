@@ -122,11 +122,11 @@ def main():
         if verdict.get("corrected"):
             print(f"            fix: {verdict['corrected']}")
             for change in verdict.get("fixes", []):
-                print(f"                 {change['from'] or '+'} -> {change['to']}  [{change['context']}]  ({change['why']})")
+                print(f"                 {change['from'] or '+'} -> {change['to']}  ({change['why']})")
         if verdict.get("natural"):
             print(f"        natural: {verdict['natural']}")
             for change in verdict.get("natural_changes", []):
-                print(f"                 {change['from'] or '+'} -> {change['to']}  [{change['context']}]  ({change['why']})")
+                print(f"                 {change['from'] or '+'} -> {change['to']}  ({change['why']})")
         for problem in problems:
             print(f"        !! {problem}")
 

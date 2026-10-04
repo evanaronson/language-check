@@ -1,0 +1,59 @@
+package com.evanaronson.languagecheck.settings
+
+import android.content.Context
+import com.evanaronson.languagecheck.llm.Provider
+import com.evanaronson.languagecheck.review.Judgments
+import com.evanaronson.languagecheck.review.Language
+import com.evanaronson.languagecheck.review.Punctuation
+
+/** The choices made on the settings screen. API keys live separately, in [ApiKeys]. */
+class Settings(context: Context) {
+    private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    init {
+        // Builds before 4 kept the provider choice alongside the API keys.
+        val legacy = context.getSharedPreferences("keys", Context.MODE_PRIVATE)
+        legacy.getString(PROVIDER, null)?.let { old ->
+            if (!prefs.contains(PROVIDER)) write(PROVIDER, old)
+            legacy.edit().remove(PROVIDER).apply()
+        }
+    }
+
+    var provider: Provider
+        get() = read(PROVIDER, Provider.Gemini)
+        set(value) = write(PROVIDER, value.name)
+
+    /** Null means the model detects the language. */
+    var language: Language?
+        get() = Language.byCode(prefs.getString(LANGUAGE, null))
+        set(value) = write(LANGUAGE, value?.code)
+
+    var punctuation: Punctuation
+        get() = read(PUNCTUATION, Punctuation.Moderate)
+        set(value) = write(PUNCTUATION, value.name)
+
+    var judgments: Judgments
+        get() = read(JUDGMENTS, Judgments.Both)
+        set(value) = write(JUDGMENTS, value.name)
+
+    /** The chosen model, or null for the provider's recommended one. */
+    fun model(provider: Provider): String? = prefs.getString(modelKey(provider), null)
+
+    fun setModel(provider: Provider, model: String?) = write(modelKey(provider), model)
+
+    private inline fun <reified E : Enum<E>> read(key: String, default: E): E =
+        prefs.getString(key, null)?.let { name -> enumValues<E>().firstOrNull { it.name == name } } ?: default
+
+    private fun write(key: String, value: String?) = prefs.edit().putString(key, value).apply()
+
+    private fun modelKey(provider: Provider) = "model.${provider.name}"
+
+    private companion object {
+        const val PROVIDER = "provider"
+        const val LANGUAGE = "language"
+        const val PUNCTUATION = "punctuation"
+
+        /** Named "checks" in earlier builds; kept so the saved choice carries over. */
+        const val JUDGMENTS = "checks"
+    }
+}

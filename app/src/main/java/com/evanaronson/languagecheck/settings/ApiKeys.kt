@@ -1,9 +1,10 @@
-package com.evanaronson.languagecheck
+package com.evanaronson.languagecheck.settings
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import com.evanaronson.languagecheck.llm.Provider
 import java.security.KeyStore
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
@@ -16,23 +17,24 @@ import javax.crypto.spec.GCMParameterSpec
  * held in the Android Keystore. Keys are entered on the settings screen and
  * never live in the code.
  */
-class KeyStorage(context: Context) {
+class ApiKeys(context: Context) {
     private val prefs = context.getSharedPreferences("keys", Context.MODE_PRIVATE)
 
     private val cache = ConcurrentHashMap<Provider, String>()
 
-    fun key(provider: Provider): String? = cache[provider] ?: prefs.getString(provider.name, null)
+    fun get(provider: Provider): String? = cache[provider] ?: prefs.getString(provider.name, null)
         ?.let { runCatching { decrypt(it) }.getOrNull() }
         ?.also { cache[provider] = it }
 
     /** What the settings screen shows about a provider's stored key. */
     fun status(provider: Provider): KeyStatus {
         if (!prefs.contains(provider.name)) return KeyStatus.None
-        val key = key(provider) ?: return KeyStatus.Unreadable
+        val key = get(provider) ?: return KeyStatus.Unreadable
         return KeyStatus.Saved(key.takeLast(4))
     }
 
-    fun setKey(provider: Provider, value: String) {
+    /** Saves [value], or removes the key when it's blank. */
+    fun set(provider: Provider, value: String) {
         val key = value.trim()
         if (key.isEmpty()) {
             prefs.edit().remove(provider.name).apply()

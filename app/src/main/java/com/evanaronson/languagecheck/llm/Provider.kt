@@ -1,4 +1,4 @@
-package com.evanaronson.languagecheck
+package com.evanaronson.languagecheck.llm
 
 enum class Provider(val label: String, val keyUrl: String, val recommendedModel: String) {
     Gemini("Google Gemini", "https://aistudio.google.com/apikey", "gemini-3.5-flash-lite"),

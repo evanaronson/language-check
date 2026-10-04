@@ -19,22 +19,25 @@ Later builds install over the previous one because they're all signed with the s
 
 ## How it works
 
-| Piece | Where |
-|---|---|
-| Selection-menu entry (`ACTION_PROCESS_TEXT`) and the floating card | `CheckActivity.kt`, `ui/ResultCard.kt` |
-| Instructions and output schema sent to the model | `app/src/main/assets/check_prompt.md`, `check_schema.json` |
-| Gemini call (plain REST, `gemini-3.5-flash-lite`, minimal thinking) | `check/GeminiChecker.kt` |
-| OpenAI call (Responses API, `gpt-6-sol`, no reasoning) | `check/OpenAIChecker.kt` |
-| Turning the verdict into edits anchored to the original, and tracking which are accepted | `check/CheckResult.kt`, `check/Edits.kt`, `check/Revision.kt` |
-| Provider choice and API keys, encrypted with an Android Keystore key | `KeyStorage.kt`, `MainActivity.kt` |
-
 Possible results: **Looks good**; fixes and/or a more natural rewording, each change highlighted separately; **Can't tell what this means**; **Not <language>** when a language is pinned in settings; or an error with Retry.
 
-Fixes and rewordings are both worked out against the original text, so they're independent: tap a highlight to see why and **Replace** just that change, or **Replace all** for a whole section. Accepted changes disappear from the list; **Undo** reverts the last one, and closing the card in any way (Done, back, tapping outside) hands the text with accepted changes back to the app. Positions come from aligning the original with the model's full corrected and natural texts (`check/Edits.kt`), with every punctuation mark its own fix; the model's change list supplies the reasons. A rewording that covers a fixed word takes precedence over that fix (`check/Revision.kt`).
+Fixes and rewordings are both worked out against the original text, so they're independent: tap a highlight to see why and **Replace** just that change, or **Replace all** for a whole section. Accepted changes disappear from the list; **Undo** reverts the last action, and closing the card in any way (Done, back, tapping outside) hands the text with accepted changes back to the app. A rewording that covers a fixed word takes precedence over that fix.
 
-Settings has a language picker (auto-detect by default, or pin Catalan or Spanish; add more in `Language.kt`), a punctuation level (Strict, Moderate by default, or Casual; defined in the prompt), which checks to run (fix, naturalize or both), and a model picker that lists the models your key can use, live from the provider, with the recommended model as the default. Picking a model runs a short test check and shows whether it works and how long it took, or the provider's error.
+Settings has a language picker (auto-detect, or pin Catalan or Spanish), a punctuation level (Strict, Moderate or Casual), which judgments to make (fix, naturalize or both), and a model picker that lists the models your key can use, live from the provider. Picking a model runs a short test check and shows how long it took, or the provider's error.
 
-Both providers use the same prompt and schema. Another provider is one more `Checker` implementation.
+## Code layout
+
+Packages under `app/src/main/java/com/evanaronson/languagecheck/`, each depending only on the ones above it:
+
+| Package | Responsibility |
+|---|---|
+| `review/` | The core, with no Android or network code. `Verdict` is the model's answer as the schema defines it; `Edits` and `Alignment` turn it into `Edit`s anchored to the original text (positions come from aligning the texts, never from the model; every punctuation mark is its own fix); `Revision` tracks which edits are accepted; `interpret()` produces a `CheckResult`. Also the check options: `Language`, `Punctuation`, `Judgments`. |
+| `llm/` | Talking to models. `Prompt` is the contract: instructions and schema from `assets/`, the user-message format, and reading answers. `GeminiClient` and `OpenAIClient` implement `ProviderClient` (check, list models) over plain REST; adding a provider means one more client. |
+| `settings/` | `Settings` (choices) and `ApiKeys` (keys encrypted with an Android Keystore key). |
+| root | `CheckService` runs a check with the chosen provider, model and options; `App` creates the long-lived objects; `CheckActivity` is the selection-menu entry; `MainActivity` hosts settings. |
+| `ui/` | `card/`: the result card and its `CheckViewModel`, which owns the check and the accepted changes. `settings/`: the settings screen and its `SettingsViewModel`. `components/`: shared controls. |
+
+The prompt and schema live in `app/src/main/assets/` so the eval script uses exactly what the app sends.
 
 ## Tuning the judgments
 

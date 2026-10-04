@@ -1,0 +1,52 @@
+package com.evanaronson.languagecheck.review
+
+/** What a finished check found. */
+sealed interface CheckResult {
+    /** The model couldn't tell what the text means. */
+    data object Unclear : CheckResult
+
+    /** The text isn't in the language chosen in settings. */
+    data class WrongLanguage(val expected: String) : CheckResult
+
+    /** Suggestions for the judgments that were asked for, in display order. */
+    data class Reviewed(val revision: Revision, val kinds: List<EditKind>) : CheckResult {
+        /** Nothing to suggest for any judgment that was made. */
+        val looksGood get() = kinds.all { revision.edits(it).isEmpty() }
+
+        /** Every suggestion has been accepted or overtaken. */
+        val isResolved get() = kinds.all { revision.remaining(it).isEmpty() }
+    }
+}
+
+/**
+ * Turns the model's [verdict] into edits of [original]. Fixes and rewordings are
+ * both worked out against the original text, so either can be accepted on its
+ * own; a "change" that changes nothing produces no edit.
+ */
+fun interpret(
+    original: String,
+    verdict: Verdict,
+    judgments: Judgments = Judgments.Both,
+    expectedLanguage: String? = null,
+): CheckResult {
+    when (verdict.status) {
+        Verdict.Status.Unclear -> return CheckResult.Unclear
+        Verdict.Status.WrongLanguage ->
+            return expectedLanguage?.let { CheckResult.WrongLanguage(it) } ?: CheckResult.Unclear
+        Verdict.Status.Ok -> Unit
+    }
+
+    val fixes = verdict.corrected.trim()
+        .takeIf { EditKind.Fix in judgments.kinds && verdict.hasErrors && it.isNotEmpty() }
+        ?.let { Edits.fixes(original, it, verdict.fixes) }
+        .orEmpty()
+    val naturals = verdict.natural.trim()
+        .takeIf { EditKind.Natural in judgments.kinds && verdict.moreNatural && it.isNotEmpty() }
+        ?.let { Edits.naturals(original, it, verdict.naturalChanges, firstId = fixes.size) }
+        .orEmpty()
+
+    return CheckResult.Reviewed(
+        Revision(original, fixes + naturals),
+        kinds = EditKind.entries.filter { it in judgments.kinds },
+    )
+}

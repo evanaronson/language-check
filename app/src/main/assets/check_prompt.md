@@ -10,8 +10,6 @@ You make up to two separate judgments, correctness and naturalness. Keep them st
 - If you genuinely cannot tell what the writer means, so that you could only guess at a repair, set `status` to `unclear`.
 - Otherwise set `status` to `ok`. Learner text is often rough; if a reasonable native speaker would understand the intended meaning, it is `ok`.
 
-Set `language` to the English name of the language you judged the text as, such as "Catalan".
-
 When `status` is not `ok`, set both booleans to false, both texts to empty strings and both lists to empty lists.
 
 ## 2. Correctness
@@ -51,7 +49,6 @@ Fields:
 
 - `from`: the exact text being replaced, copied from the text before the change. Empty when something is only added, such as a comma.
 - `to`: the exact replacement, copied from the text after the change: just the word, or just the punctuation mark. Never empty: when a change only deletes words, include the neighbouring word in both `from` and `to`.
-- `context`: two to four consecutive words copied exactly from the text after the change, containing `to`, so it can be found. For a comma after "música", the context could be "música, no?".
 - `why`: the reason in English, at most five words, naming only this change, such as "Missing accent", "Comma before a tag question", "Tomàquet is masculine", "Calque from English". No full sentences.
 
 List items in the order they appear in the text.
@@ -66,70 +63,70 @@ Language: auto
 Punctuation: moderate
 Checks: both
 Text: Bon dia! Com estas amb la pluja?
-{"status":"ok","language":"Catalan","has_errors":true,"corrected":"Bon dia! Com estàs amb la pluja?","fixes":[{"from":"estas","to":"estàs","context":"Com estàs amb","why":"Missing accent"}],"more_natural":true,"natural":"Bon dia! Com portes la pluja?","natural_changes":[{"from":"estas amb","to":"portes","context":"Com portes la pluja","why":"Usual way to say it"}]}
+{"status":"ok","has_errors":true,"corrected":"Bon dia! Com estàs amb la pluja?","fixes":[{"from":"estas","to":"estàs","why":"Missing accent"}],"more_natural":true,"natural":"Bon dia! Com portes la pluja?","natural_changes":[{"from":"estas amb","to":"portes","why":"Usual way to say it"}]}
 
 Language: Catalan (standard Central Catalan)
 Punctuation: moderate
 Checks: both
 Text: Ens veiem demà a les set?
-{"status":"ok","language":"Catalan","has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
+{"status":"ok","has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
 Text: Voy a tomar una ducha y te llamo
-{"status":"ok","language":"Spanish","has_errors":false,"corrected":"","fixes":[],"more_natural":true,"natural":"Me voy a duchar y te llamo","natural_changes":[{"from":"Voy a tomar una ducha","to":"Me voy a duchar","context":"Me voy a duchar","why":"More usual in Spain"}]}
+{"status":"ok","has_errors":false,"corrected":"","fixes":[],"more_natural":true,"natural":"Me voy a duchar y te llamo","natural_changes":[{"from":"Voy a tomar una ducha","to":"Me voy a duchar","why":"More usual in Spain"}]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
 Text: Voy a tomar una ducha y te llamo despues
-{"status":"ok","language":"Spanish","has_errors":true,"corrected":"Voy a tomar una ducha y te llamo después","fixes":[{"from":"despues","to":"después","context":"te llamo después","why":"Missing accent"}],"more_natural":true,"natural":"Me voy a duchar y te llamo despues","natural_changes":[{"from":"Voy a tomar una ducha","to":"Me voy a duchar","context":"Me voy a duchar","why":"More usual in Spain"}]}
+{"status":"ok","has_errors":true,"corrected":"Voy a tomar una ducha y te llamo después","fixes":[{"from":"despues","to":"después","why":"Missing accent"}],"more_natural":true,"natural":"Me voy a duchar y te llamo despues","natural_changes":[{"from":"Voy a tomar una ducha","to":"Me voy a duchar","why":"More usual in Spain"}]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
 Text: Ayer fui a la playa con mis amigos y comimos paella
-{"status":"ok","language":"Spanish","has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
+{"status":"ok","has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
 Text: Ahir vaig comprar unes tomàquets molt bo
-{"status":"ok","language":"Catalan","has_errors":true,"corrected":"Ahir vaig comprar uns tomàquets molt bons","fixes":[{"from":"unes","to":"uns","context":"comprar uns tomàquets","why":"Tomàquet is masculine"},{"from":"bo","to":"bons","context":"tomàquets molt bons","why":"Agrees with plural noun"}],"more_natural":false,"natural":"","natural_changes":[]}
+{"status":"ok","has_errors":true,"corrected":"Ahir vaig comprar uns tomàquets molt bons","fixes":[{"from":"unes","to":"uns","why":"Tomàquet is masculine"},{"from":"bo","to":"bons","why":"Agrees with plural noun"}],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
 Text: hola q tal bb estas bien te encanta esta musica no
-{"status":"ok","language":"Spanish","has_errors":true,"corrected":"hola, q tal, bb? Estás bien? Te encanta esta música, no?","fixes":[{"from":"","to":",","context":"hola, q tal","why":"Comma after greeting"},{"from":"","to":",","context":"q tal, bb?","why":"Comma before a name"},{"from":"","to":"?","context":"tal, bb? Estás","why":"End of question"},{"from":"estas","to":"Estás","context":"bb? Estás bien","why":"Capital and accent"},{"from":"","to":"?","context":"Estás bien? Te","why":"End of question"},{"from":"te","to":"Te","context":"bien? Te encanta","why":"New sentence, capital"},{"from":"musica","to":"música","context":"esta música, no?","why":"Missing accent"},{"from":"","to":",","context":"música, no?","why":"Comma before a tag question"},{"from":"","to":"?","context":"música, no?","why":"End of question"}],"more_natural":false,"natural":"","natural_changes":[]}
+{"status":"ok","has_errors":true,"corrected":"hola, q tal, bb? Estás bien? Te encanta esta música, no?","fixes":[{"from":"","to":",","why":"Comma after greeting"},{"from":"","to":",","why":"Comma before a name"},{"from":"","to":"?","why":"End of question"},{"from":"estas","to":"Estás","why":"Capital and accent"},{"from":"","to":"?","why":"End of question"},{"from":"te","to":"Te","why":"New sentence, capital"},{"from":"musica","to":"música","why":"Missing accent"},{"from":"","to":",","why":"Comma before a tag question"},{"from":"","to":"?","why":"End of question"}],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: strict
 Checks: both
 Text: que tal el finde
-{"status":"ok","language":"Spanish","has_errors":true,"corrected":"¿Qué tal el finde?","fixes":[{"from":"","to":"¿","context":"¿Qué tal","why":"Opening question mark"},{"from":"que","to":"Qué","context":"¿Qué tal el","why":"Capital and accent"},{"from":"","to":"?","context":"el finde?","why":"Closing question mark"}],"more_natural":false,"natural":"","natural_changes":[]}
+{"status":"ok","has_errors":true,"corrected":"¿Qué tal el finde?","fixes":[{"from":"","to":"¿","why":"Opening question mark"},{"from":"que","to":"Qué","why":"Capital and accent"},{"from":"","to":"?","why":"Closing question mark"}],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: casual
 Checks: both
 Text: hola q tal bb estas bien
-{"status":"ok","language":"Spanish","has_errors":true,"corrected":"hola q tal bb estás bien","fixes":[{"from":"estas","to":"estás","context":"bb estás bien","why":"Missing accent"}],"more_natural":false,"natural":"","natural_changes":[]}
+{"status":"ok","has_errors":true,"corrected":"hola q tal bb estás bien","fixes":[{"from":"estas","to":"estás","why":"Missing accent"}],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: moderate
 Checks: fix
 Text: Voy a tomar una ducha y te llamo
-{"status":"ok","language":"Spanish","has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
+{"status":"ok","has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
 Text: el porta de la quan si mesa verd
-{"status":"unclear","language":"Catalan","has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
+{"status":"unclear","has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: Spanish (Peninsular)
 Punctuation: moderate
 Checks: both
 Text: See you tomorrow at the station
-{"status":"wrong_language","language":"English","has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
+{"status":"wrong_language","has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
