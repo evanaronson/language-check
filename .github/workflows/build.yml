@@ -47,8 +47,10 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          # Passed through the environment so quotes in commit messages can't break the command.
+          NOTES: ${{ github.event.head_commit.message || 'Manual build' }}
         run: |
           gh release create "build-${{ github.run_number }}" "language-check-${{ github.run_number }}.apk" \
             --title "Build ${{ github.run_number }}" \
-            --notes "${{ github.event.head_commit.message || 'Manual build' }}" \
+            --notes "$NOTES" \
             --latest
