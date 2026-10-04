@@ -15,6 +15,7 @@ import kotlinx.serialization.json.putJsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Calls the Gemini Developer API's generateContent over plain REST.
@@ -24,25 +25,37 @@ class GeminiChecker(
     private val http: OkHttpClient,
     private val prompt: Prompt,
     private val apiKey: () -> String?,
-    private val model: String = MODEL,
+    private val model: () -> String,
 ) : Checker {
     private val json = Json { ignoreUnknownKeys = true }
     private val schema = json.parseToJsonElement(prompt.schemaJson)
 
-    override suspend fun check(text: String): ModelVerdict {
-        val key = apiKey() ?: throw CheckFailure(CheckFailure.Reason.NoKey)
-        val request = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-            .header("x-goog-api-key", key)
-            .post(body(text).toString().toRequestBody(JSON_MEDIA_TYPE))
-            .build()
+    /** Models that rejected the minimal thinking level; they get the default instead. */
+    private val noMinimalThinking = ConcurrentHashMap.newKeySet<String>()
 
-        val (code, payload) = http.newCall(request).await()
+    override suspend fun check(text: String, language: String?): ModelVerdict {
+        val key = apiKey() ?: throw CheckFailure(CheckFailure.Reason.NoKey)
+        val model = model()
+        val minimal = model !in noMinimalThinking
+        val (code, payload) = send(key, model, body(text, language, minimal))
+        if (code == 400 && minimal && "thinking" in payload.lowercase()) {
+            noMinimalThinking += model
+            return check(text, language)
+        }
         if (code != 200) throw CheckFailure(failureFor(code, payload))
         return parse(payload)
     }
 
-    private fun body(text: String): JsonObject = buildJsonObject {
+    private suspend fun send(key: String, model: String, body: JsonObject): Pair<Int, String> {
+        val request = Request.Builder()
+            .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+            .header("x-goog-api-key", key)
+            .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        return http.newCall(request).await()
+    }
+
+    private fun body(text: String, language: String?, minimalThinking: Boolean): JsonObject = buildJsonObject {
         putJsonObject("systemInstruction") {
             putJsonArray("parts") { add(buildJsonObject { put("text", prompt.system) }) }
         }
@@ -50,16 +63,16 @@ class GeminiChecker(
             add(
                 buildJsonObject {
                     put("role", "user")
-                    putJsonArray("parts") { add(buildJsonObject { put("text", "Text: $text") }) }
+                    putJsonArray("parts") { add(buildJsonObject { put("text", userMessage(text, language)) }) }
                 },
             )
         }
         putJsonObject("generationConfig") {
             put("responseMimeType", "application/json")
             put("responseJsonSchema", schema)
-            put("maxOutputTokens", 512)
+            put("maxOutputTokens", 1024)
             // Minimal thinking keeps a check inside the ~2 s budget.
-            putJsonObject("thinkingConfig") { put("thinkingLevel", "MINIMAL") }
+            if (minimalThinking) putJsonObject("thinkingConfig") { put("thinkingLevel", "MINIMAL") }
         }
     }
 
@@ -76,9 +89,5 @@ class GeminiChecker(
         throw CheckFailure(CheckFailure.Reason.BadResponse, e)
     } catch (e: IllegalArgumentException) {
         throw CheckFailure(CheckFailure.Reason.BadResponse, e)
-    }
-
-    companion object {
-        const val MODEL = "gemini-3.5-flash-lite"
     }
 }

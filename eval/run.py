@@ -5,9 +5,9 @@ judgment mismatches and latency.
     GEMINI_API_KEY=... python3 eval/run.py
     OPENAI_API_KEY=... python3 eval/run.py --provider openai
 
-Each case may set "status", "fix" (a correction is expected or not) and
-"natural" (a more natural alternative is expected or not). Omitted fields
-aren't checked. "natural": false cases are the important ones: they catch the
+Each case may set "language" (as the app's language setting names it; default
+auto), "status", "fix" (a correction is expected or not) and "natural" (a more
+natural alternative is expected or not). Omitted fields aren't checked. "natural": false cases are the important ones: they catch the
 app nagging about language that is already fine.
 """
 import argparse
@@ -23,14 +23,14 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "app/src/main/assets"
 
 
-def check_gemini(model, key, system, schema, text):
+def check_gemini(model, key, system, schema, message):
     body = {
         "systemInstruction": {"parts": [{"text": system}]},
-        "contents": [{"role": "user", "parts": [{"text": f"Text: {text}"}]}],
+        "contents": [{"role": "user", "parts": [{"text": message}]}],
         "generationConfig": {
             "responseMimeType": "application/json",
             "responseJsonSchema": schema,
-            "maxOutputTokens": 512,
+            "maxOutputTokens": 1024,
             "thinkingConfig": {"thinkingLevel": "MINIMAL"},
         },
     }
@@ -45,16 +45,15 @@ def check_gemini(model, key, system, schema, text):
     return json.loads(answer), elapsed
 
 
-def check_openai(model, key, system, schema, text):
-    # Mirrors OpenAIChecker: strict mode needs additionalProperties and rejects propertyOrdering.
+def check_openai(model, key, system, schema, message):
+    # Mirrors OpenAIChecker: strict mode rejects Gemini's propertyOrdering.
     schema = {k: v for k, v in schema.items() if k != "propertyOrdering"}
-    schema["additionalProperties"] = False
     body = {
         "model": model,
         "instructions": system,
-        "input": f"Text: {text}",
+        "input": message,
         "store": False,
-        "max_output_tokens": 512,
+        "max_output_tokens": 1024,
         "reasoning": {"effort": "none"},
         "text": {"format": {"type": "json_schema", "name": "check", "strict": True, "schema": schema}},
     }
@@ -100,7 +99,8 @@ def main():
     times, failures = [], 0
     for case in cases:
         try:
-            verdict, elapsed = check(model, key, system, schema, case["text"])
+            message = f"Language: {case.get('language', 'auto')}\nText: {case['text']}"
+            verdict, elapsed = check(model, key, system, schema, message)
         except (urllib.error.URLError, KeyError, json.JSONDecodeError) as error:
             failures += 1
             print(f"ERROR  {case['text']}\n       {error}")
@@ -118,8 +118,12 @@ def main():
         print(f"{mark}{elapsed:4.1f}s  {case['text']}")
         if verdict.get("corrected"):
             print(f"            fix: {verdict['corrected']}")
+            for change in verdict.get("fixes", []):
+                print(f"                 {change['from']} -> {change['to']}  ({change['why']})")
         if verdict.get("natural"):
             print(f"        natural: {verdict['natural']}")
+            for change in verdict.get("natural_changes", []):
+                print(f"                 {change['from']} -> {change['to']}  ({change['why']})")
         for problem in problems:
             print(f"        !! {problem}")
 

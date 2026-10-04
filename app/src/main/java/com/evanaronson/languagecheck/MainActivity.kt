@@ -18,18 +18,21 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.material3.RadioButton
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,13 +43,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.evanaronson.languagecheck.check.CheckFailure
-import com.evanaronson.languagecheck.check.interpret
 import com.evanaronson.languagecheck.ui.AppTheme
 import com.evanaronson.languagecheck.ui.CardActions
 import com.evanaronson.languagecheck.ui.CardState
@@ -55,7 +59,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Launcher screen: set the API key once and try a check without leaving the app. */
+/** Launcher screen: language, model and API key, plus a way to try a check. */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,23 +75,62 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** Models offered for a provider: still loading, loaded, or failed to load. */
+private sealed interface ModelList {
+    data object Loading : ModelList
+    data class Loaded(val models: List<String>) : ModelList
+    data object Failed : ModelList
+}
+
 @Composable
 private fun Settings(app: App) {
     val scope = rememberCoroutineScope()
+    var loaded by remember { mutableStateOf(false) }
+    var language by remember { mutableStateOf<Language?>(null) }
     var provider by remember { mutableStateOf(Provider.Gemini) }
     var savedKeys by remember { mutableStateOf(emptySet<Provider>()) }
+    var model by remember { mutableStateOf<String?>(null) }
+    var models by remember { mutableStateOf<ModelList>(ModelList.Loading) }
     var key by remember { mutableStateOf("") }
     var sample by remember { mutableStateOf("Bon dia! Com estas amb la pluja?") }
     var result by remember { mutableStateOf<CardState?>(null) }
     var checked by remember { mutableStateOf("") }
 
-    // Keystore access is slow enough to keep off the main thread.
+    // Keystore and preference reads are slow enough to keep off the main thread.
     LaunchedEffect(Unit) {
-        val (current, saved) = withContext(Dispatchers.IO) {
-            app.keys.provider to Provider.entries.filter { app.keys.key(it) != null }.toSet()
+        val state = withContext(Dispatchers.IO) {
+            Triple(
+                app.settings.language,
+                app.settings.provider,
+                Provider.entries.filter { app.keys.key(it) != null }.toSet(),
+            )
         }
-        provider = current
-        savedKeys = saved
+        language = state.first
+        provider = state.second
+        savedKeys = state.third
+        loaded = true
+    }
+
+    // Reload the provider's live model list whenever the provider or its key changes.
+    LaunchedEffect(loaded, provider, provider in savedKeys) {
+        if (!loaded) return@LaunchedEffect
+        model = withContext(Dispatchers.IO) { app.settings.model(provider) }
+        if (provider !in savedKeys) {
+            models = ModelList.Loaded(emptyList())
+            return@LaunchedEffect
+        }
+        models = ModelList.Loading
+        models = try {
+            val apiKey = withContext(Dispatchers.IO) { app.keys.key(provider) }.orEmpty()
+            ModelList.Loaded(
+                when (provider) {
+                    Provider.Gemini -> app.catalog.gemini(apiKey)
+                    Provider.OpenAI -> app.catalog.openAI(apiKey)
+                },
+            )
+        } catch (_: CheckFailure) {
+            ModelList.Failed
+        }
     }
 
     fun saveKey(value: String) {
@@ -106,7 +149,7 @@ private fun Settings(app: App) {
         result = CardState.Loading
         scope.launch {
             result = try {
-                CardState.Done(interpret(text, withContext(Dispatchers.IO) { app.checker().check(text) }))
+                CardState.Done(app.check(text))
             } catch (failure: CheckFailure) {
                 CardState.Failed(failure.reason)
             }
@@ -123,16 +166,26 @@ private fun Settings(app: App) {
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Language Check", style = MaterialTheme.typography.headlineMedium)
+        Text("Linguize", style = MaterialTheme.typography.headlineMedium)
         Text(
-            "Select Catalan or Spanish text in any app, then tap Check in the selection menu " +
-                "(it may be under ⋮).",
+            "Select text you wrote in any app, then tap Check in the selection menu (it may be under ⋮).",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Spacer(Modifier.height(8.dp))
-        Text("Model", style = MaterialTheme.typography.titleMedium)
+        Section("Language")
+        Dropdown(
+            label = "Check text as",
+            selected = language?.name ?: "Auto-detect",
+            options = listOf<Language?>(null) + Language.all,
+            optionLabel = { it?.name ?: "Auto-detect" },
+            onSelect = { choice ->
+                language = choice
+                scope.launch(Dispatchers.IO) { app.settings.language = choice }
+            },
+        )
+
+        Section("Model")
         Column(Modifier.selectableGroup()) {
             Provider.entries.forEach { option ->
                 Row(
@@ -144,7 +197,7 @@ private fun Settings(app: App) {
                             onClick = {
                                 provider = option
                                 key = ""
-                                scope.launch(Dispatchers.IO) { app.keys.provider = option }
+                                scope.launch(Dispatchers.IO) { app.settings.provider = option }
                             },
                         )
                         .padding(vertical = 4.dp),
@@ -163,6 +216,24 @@ private fun Settings(app: App) {
                 }
             }
         }
+
+        val recommended = "${provider.recommendedModel} (recommended)"
+        val available = (models as? ModelList.Loaded)?.models.orEmpty().filter { it != provider.recommendedModel }
+        Dropdown(
+            label = when (models) {
+                ModelList.Loading -> "Model · loading list…"
+                ModelList.Failed -> "Model · couldn't load list"
+                is ModelList.Loaded -> if (provider in savedKeys) "Model" else "Model · save a key to see all"
+            },
+            selected = model ?: recommended,
+            options = listOf<String?>(null) + available,
+            optionLabel = { it ?: recommended },
+            onSelect = { choice ->
+                model = choice
+                val target = provider
+                scope.launch(Dispatchers.IO) { app.settings.setModel(target, choice) }
+            },
+        )
 
         OutlinedTextField(
             value = key,
@@ -184,8 +255,7 @@ private fun Settings(app: App) {
             }) { Text("Get a key") }
         }
 
-        Spacer(Modifier.height(8.dp))
-        Text("Try it", style = MaterialTheme.typography.titleMedium)
+        Section("Try it")
         OutlinedTextField(
             value = sample,
             onValueChange = { sample = it },
@@ -201,7 +271,7 @@ private fun Settings(app: App) {
                 actions = CardActions(
                     onCopy = {
                         context.getSystemService(ClipboardManager::class.java)
-                            .setPrimaryClip(ClipData.newPlainText("Language Check", it))
+                            .setPrimaryClip(ClipData.newPlainText("Linguize", it))
                     },
                     onReplace = { sample = it },
                     onRetry = ::runCheck,
@@ -209,6 +279,48 @@ private fun Settings(app: App) {
                 ),
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+    }
+}
+
+@Composable
+private fun Section(title: String) {
+    Spacer(Modifier.height(8.dp))
+    Text(title, style = MaterialTheme.typography.titleMedium)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun <T> Dropdown(
+    label: String,
+    selected: String,
+    options: List<T>,
+    optionLabel: (T) -> String,
+    onSelect: (T) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = selected,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(optionLabel(option)) },
+                    onClick = {
+                        expanded = false
+                        onSelect(option)
+                    },
+                )
+            }
         }
     }
 }

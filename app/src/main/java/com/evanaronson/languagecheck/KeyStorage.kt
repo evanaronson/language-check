@@ -13,19 +13,13 @@ import javax.crypto.spec.GCMParameterSpec
 
 /**
  * Stores provider API keys in app-private preferences, encrypted with a key
- * held in the Android Keystore, plus which provider checks use. Keys are
- * entered on the settings screen and never live in the code.
+ * held in the Android Keystore. Keys are entered on the settings screen and
+ * never live in the code.
  */
 class KeyStorage(context: Context) {
     private val prefs = context.getSharedPreferences("keys", Context.MODE_PRIVATE)
 
     private val cache = ConcurrentHashMap<Provider, String>()
-
-    var provider: Provider
-        get() = prefs.getString(PROVIDER, null)
-            ?.let { name -> Provider.entries.firstOrNull { it.name == name } }
-            ?: Provider.Gemini
-        set(value) = prefs.edit().putString(PROVIDER, value.name).apply()
 
     fun key(provider: Provider): String? = cache[provider] ?: prefs.getString(provider.name, null)
         ?.let { runCatching { decrypt(it) }.getOrNull() }
@@ -75,6 +69,5 @@ class KeyStorage(context: Context) {
         const val ALIAS = "provider-keys"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val IV_BYTES = 12
-        const val PROVIDER = "provider"
     }
 }

@@ -21,10 +21,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.evanaronson.languagecheck.check.CheckFailure
@@ -82,7 +78,7 @@ private fun Result(result: CheckResult, actions: CardActions) {
     when (result) {
         CheckResult.AllGood -> Verdict(Mark.Good, "Looks good", "No fixes · Sounds natural")
         CheckResult.Unclear -> Verdict(Mark.Unsure, "Can't tell what this means")
-        CheckResult.NotSupported -> Verdict(Mark.Unsure, "Not Catalan or Spanish")
+        is CheckResult.WrongLanguage -> Verdict(Mark.Unsure, "Not ${result.expected}", "Change the language in settings")
         is CheckResult.Feedback -> Feedback(result, actions)
     }
 }
@@ -113,7 +109,7 @@ private fun Feedback(result: CheckResult.Feedback, actions: CardActions) {
 private fun SuggestionBlock(label: String, suggestion: Suggestion, accent: Color, actions: CardActions) {
     Text(label, style = MaterialTheme.typography.labelLarge, color = accent)
     Spacer(Modifier.height(6.dp))
-    Text(highlighted(suggestion, accent), style = MaterialTheme.typography.bodyLarge)
+    HighlightedText(suggestion.text, suggestion.changes, accent)
     Spacer(Modifier.height(10.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = { actions.onCopy(suggestion.text) }) { Text("Copy") }
@@ -123,19 +119,12 @@ private fun SuggestionBlock(label: String, suggestion: Suggestion, accent: Color
     }
 }
 
-private fun highlighted(suggestion: Suggestion, accent: Color): AnnotatedString = buildAnnotatedString {
-    append(suggestion.text)
-    val style = SpanStyle(color = accent, fontWeight = FontWeight.SemiBold)
-    for (range in suggestion.changed) {
-        addStyle(style, range.first, range.last + 1)
-    }
-}
-
 @Composable
 private fun Failure(reason: CheckFailure.Reason, actions: CardActions) {
     val (title, detail) = when (reason) {
         CheckFailure.Reason.NoKey -> "Add an API key" to null
         CheckFailure.Reason.BadKey -> "API key rejected" to "Check it in settings"
+        CheckFailure.Reason.BadModel -> "Model not available" to "Pick another in settings"
         CheckFailure.Reason.Offline -> "No connection" to null
         CheckFailure.Reason.Timeout -> "Took too long" to null
         CheckFailure.Reason.RateLimited -> "Rate limited" to "Try again in a moment"
@@ -144,7 +133,7 @@ private fun Failure(reason: CheckFailure.Reason, actions: CardActions) {
     }
     Verdict(Mark.Problem, title, detail)
     Spacer(Modifier.height(12.dp))
-    val needsSettings = reason == CheckFailure.Reason.NoKey || reason == CheckFailure.Reason.BadKey
+    val needsSettings = reason in setOf(CheckFailure.Reason.NoKey, CheckFailure.Reason.BadKey, CheckFailure.Reason.BadModel)
     if (needsSettings) {
         FilledTonalButton(onClick = actions.onOpenSettings) { Text("Open settings") }
     } else {

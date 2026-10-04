@@ -1,15 +1,40 @@
+<!-- A happy speech bubble wearing an accent mark. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M34,32h40a8,8 0,0 1,8 8v24a8,8 0,0 1,-8 8H50l-12,10v-10h-4a8,8 0,0 1,-8 -8V40a8,8 0,0 1,8 -8z" />
-    <path
-        android:strokeColor="#1F6F5C"
-        android:strokeWidth="6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M42,52l8,8l16,-16" />
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="1.12"
+        android:scaleY="1.12">
+        <path
+            android:fillColor="#FFF4E6"
+            android:pathData="M44,33h20a15,15 0,0 1,15 15v8a15,15 0,0 1,-15 15H52l-11,9v-9.6A15,15 0,0 1,29 56v-8a15,15 0,0 1,15 -15z" />
+        <path
+            android:fillColor="#3B2622"
+            android:pathData="M46.5,51m-3.6,0a3.6,3.6 0,1 0,7.2 0a3.6,3.6 0,1 0,-7.2 0" />
+        <path
+            android:fillColor="#3B2622"
+            android:pathData="M61.5,51m-3.6,0a3.6,3.6 0,1 0,7.2 0a3.6,3.6 0,1 0,-7.2 0" />
+        <path
+            android:fillAlpha="0.7"
+            android:fillColor="#FF9E86"
+            android:pathData="M41,58m-3,0a3,3 0,1 0,6 0a3,3 0,1 0,-6 0" />
+        <path
+            android:fillAlpha="0.7"
+            android:fillColor="#FF9E86"
+            android:pathData="M67,58m-3,0a3,3 0,1 0,6 0a3,3 0,1 0,-6 0" />
+        <path
+            android:pathData="M49.5,58.5q4.5,4 9,0"
+            android:strokeWidth="2.6"
+            android:strokeColor="#3B2622"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M58,27.5l9,-7"
+            android:strokeWidth="5.5"
+            android:strokeColor="#1F6F5C"
+            android:strokeLineCap="round" />
+    </group>
 </vector>

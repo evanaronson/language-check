@@ -45,6 +45,7 @@ internal suspend fun Call.await(): Pair<Int, String> = suspendCancellableCorouti
 internal fun failureFor(code: Int, payload: String) = when {
     code == 400 && "API_KEY_INVALID" in payload -> CheckFailure.Reason.BadKey
     code == 401 || code == 403 -> CheckFailure.Reason.BadKey
+    code == 404 -> CheckFailure.Reason.BadModel
     code == 429 -> CheckFailure.Reason.RateLimited
     code >= 500 -> CheckFailure.Reason.Server
     else -> CheckFailure.Reason.BadResponse

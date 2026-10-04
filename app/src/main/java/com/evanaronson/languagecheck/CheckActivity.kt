@@ -27,15 +27,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.evanaronson.languagecheck.check.CheckFailure
-import com.evanaronson.languagecheck.check.interpret
 import com.evanaronson.languagecheck.ui.AppTheme
 import com.evanaronson.languagecheck.ui.CardActions
 import com.evanaronson.languagecheck.ui.CardState
 import com.evanaronson.languagecheck.ui.ResultCard
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * The "Check" entry in the text-selection menu. Shows a floating card over
@@ -107,9 +104,7 @@ class CheckActivity : ComponentActivity() {
         val app = application as App
         job = lifecycleScope.launch {
             state = try {
-                // Key decryption and prompt loading happen on first use; keep them off the main thread.
-                val verdict = withContext(Dispatchers.IO) { app.checker().check(text) }
-                CardState.Done(interpret(text, verdict))
+                CardState.Done(app.check(text))
             } catch (failure: CheckFailure) {
                 CardState.Failed(failure.reason)
             }
@@ -118,7 +113,7 @@ class CheckActivity : ComponentActivity() {
 
     private fun copy(value: String) {
         val clipboard = getSystemService(ClipboardManager::class.java)
-        clipboard.setPrimaryClip(ClipData.newPlainText("Language Check", value))
+        clipboard.setPrimaryClip(ClipData.newPlainText("Linguize", value))
         // Android 13+ shows its own clipboard confirmation.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()

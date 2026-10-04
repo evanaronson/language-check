@@ -1,6 +1,6 @@
-# Language Check
+# Linguize
 
-A small Android utility. You select Catalan or Spanish text you've written in any app, tap **Check** in the selection menu, and a card floats over the app with two independent judgments:
+A small Android utility for checking text you've written in a language you're learning. You select the text in any app, tap **Check** in the selection menu, and a card floats over the app with two independent judgments:
 
 1. **Correctness:** the minimum fix needed, or "No fixes".
 2. **Naturalness:** one clearly better phrasing, or "Sounds natural".
@@ -13,7 +13,7 @@ Every push to `main` builds a signed APK and publishes it as a GitHub release. O
 
 1. Open the latest release in this repo and download `language-check-N.apk`.
 2. Open it and allow your browser to install unknown apps when Android asks.
-3. Open **Language Check**, pick Google Gemini or OpenAI, paste that provider's API key ([Gemini](https://aistudio.google.com/apikey), [OpenAI](https://platform.openai.com/api-keys)), tap Save, and try a sentence. Keys are stored encrypted on the phone; none are in the code.
+3. Open **Linguize**, pick Google Gemini or OpenAI, paste that provider's API key ([Gemini](https://aistudio.google.com/apikey), [OpenAI](https://platform.openai.com/api-keys)), tap Save, and try a sentence. Keys are stored encrypted on the phone; none are in the code.
 
 Later builds install over the previous one because they're all signed with the same key.
 
@@ -28,7 +28,9 @@ Later builds install over the previous one because they're all signed with the s
 | Turning the verdict into card states, plus the word diff behind "1 fix" and highlights | `check/CheckResult.kt`, `check/WordDiff.kt` |
 | Provider choice and API keys, encrypted with an Android Keystore key | `KeyStorage.kt`, `MainActivity.kt` |
 
-Possible results: **Looks good** (no fixes, sounds natural); a fix and/or a more natural alternative; **Can't tell what this means**; **Not Catalan or Spanish**; or an error with Retry.
+Possible results: **Looks good** (no fixes, sounds natural); fixes and/or a more natural alternative, each change highlighted separately (tap one for the reason); **Can't tell what this means**; **Not <language>** when a language is pinned in settings; or an error with Retry.
+
+Settings has a language picker (auto-detect by default, or pin Catalan or Spanish; add more in `Language.kt`) and a model picker that lists the models your key can use, live from the provider, with the recommended model as the default.
 
 Both providers use the same prompt and schema. Another provider is one more `Checker` implementation.
 
