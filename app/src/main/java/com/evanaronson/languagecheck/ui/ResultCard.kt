@@ -1,5 +1,9 @@
 package com.evanaronson.languagecheck.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,19 +46,44 @@ class CardActions(
 )
 
 @Composable
-fun ResultCard(original: String, state: CardState, actions: CardActions, modifier: Modifier = Modifier) {
+fun ResultCard(
+    original: String,
+    state: CardState,
+    actions: CardActions,
+    modifier: Modifier = Modifier,
+    /** Scroll inside the card; false when the card already sits in a scrolling screen. */
+    scrollable: Boolean = true,
+) {
+    val container = MaterialTheme.colorScheme.surfaceContainerHigh
     Surface(
         modifier = modifier,
         shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = container,
         tonalElevation = 6.dp,
         shadowElevation = 8.dp,
     ) {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
-            when (state) {
-                CardState.Loading -> Loading(original)
-                is CardState.Done -> Result(state.result, actions)
-                is CardState.Failed -> Failure(state.reason, actions)
+        val scroll = rememberScrollState()
+        Box {
+            Column(
+                Modifier
+                    .then(if (scrollable) Modifier.verticalScroll(scroll) else Modifier)
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
+            ) {
+                when (state) {
+                    CardState.Loading -> Loading(original)
+                    is CardState.Done -> Result(state.result, actions)
+                    is CardState.Failed -> Failure(state.reason, actions)
+                }
+            }
+            // Fades out the bottom edge while there's more to scroll to.
+            if (scrollable && scroll.canScrollForward) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(32.dp)
+                        .background(Brush.verticalGradient(listOf(container.copy(alpha = 0f), container))),
+                )
             }
         }
     }
@@ -130,13 +159,14 @@ private fun Failure(reason: CheckFailure.Reason, actions: CardActions) {
         CheckFailure.Reason.RateLimited -> "Rate limited" to "Try again in a moment"
         CheckFailure.Reason.Server -> "The model isn't responding" to null
         CheckFailure.Reason.BadResponse -> "Couldn't read the answer" to null
+        CheckFailure.Reason.TooLong -> "Selection too long" to "Select up to about a page of text"
     }
     Verdict(Mark.Problem, title, detail)
     Spacer(Modifier.height(12.dp))
     val needsSettings = reason in setOf(CheckFailure.Reason.NoKey, CheckFailure.Reason.BadKey, CheckFailure.Reason.BadModel)
     if (needsSettings) {
         FilledTonalButton(onClick = actions.onOpenSettings) { Text("Open settings") }
-    } else {
+    } else if (reason != CheckFailure.Reason.TooLong) {
         FilledTonalButton(onClick = actions.onRetry) { Text("Retry") }
     }
 }

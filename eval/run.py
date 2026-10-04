@@ -30,7 +30,7 @@ def check_gemini(model, key, system, schema, message):
         "generationConfig": {
             "responseMimeType": "application/json",
             "responseJsonSchema": schema,
-            "maxOutputTokens": 1024,
+            "maxOutputTokens": 4096,
             "thinkingConfig": {"thinkingLevel": "MINIMAL"},
         },
     }
@@ -53,7 +53,7 @@ def check_openai(model, key, system, schema, message):
         "instructions": system,
         "input": message,
         "store": False,
-        "max_output_tokens": 1024,
+        "max_output_tokens": 4096,
         "reasoning": {"effort": "none"},
         "text": {"format": {"type": "json_schema", "name": "check", "strict": True, "schema": schema}},
     }

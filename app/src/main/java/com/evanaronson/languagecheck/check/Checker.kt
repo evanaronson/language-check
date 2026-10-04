@@ -11,7 +11,7 @@ interface Checker {
 }
 
 class CheckFailure(val reason: Reason, cause: Throwable? = null) : Exception(reason.name, cause) {
-    enum class Reason { NoKey, BadKey, BadModel, Offline, Timeout, RateLimited, Server, BadResponse }
+    enum class Reason { NoKey, BadKey, BadModel, Offline, Timeout, RateLimited, Server, BadResponse, TooLong }
 }
 
 /** The user message: the setting lines the prompt expects, then the text. */

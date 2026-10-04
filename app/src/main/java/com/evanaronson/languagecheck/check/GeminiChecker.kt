@@ -70,7 +70,8 @@ class GeminiChecker(
         putJsonObject("generationConfig") {
             put("responseMimeType", "application/json")
             put("responseJsonSchema", schema)
-            put("maxOutputTokens", 1024)
+            // Room for a long paragraph twice over plus the list of changes.
+            put("maxOutputTokens", 4096)
             // Minimal thinking keeps a check inside the ~2 s budget.
             if (minimalThinking) putJsonObject("thinkingConfig") { put("thinkingLevel", "MINIMAL") }
         }

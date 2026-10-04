@@ -312,6 +312,7 @@ private fun Settings(app: App) {
                     onOpenSettings = {},
                 ),
                 modifier = Modifier.fillMaxWidth(),
+                scrollable = false,
             )
         }
     }

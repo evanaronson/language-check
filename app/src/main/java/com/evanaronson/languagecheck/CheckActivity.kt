@@ -11,9 +11,10 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.widthIn
@@ -66,7 +67,7 @@ class CheckActivity : ComponentActivity() {
         )
         setContent {
             AppTheme {
-                Box(
+                BoxWithConstraints(
                     Modifier
                         .fillMaxSize()
                         .background(Color.Black.copy(alpha = 0.32f))
@@ -86,6 +87,8 @@ class CheckActivity : ComponentActivity() {
                         modifier = Modifier
                             .widthIn(max = 520.dp)
                             .fillMaxWidth()
+                            // Long text scrolls inside the card; keep some of the app visible to tap away.
+                            .heightIn(max = maxHeight * 0.85f)
                             // Taps on the card itself shouldn't dismiss it.
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },

@@ -55,7 +55,8 @@ class OpenAIChecker(
             put("instructions", prompt.system)
             put("input", userMessage(text, language, punctuation))
             put("store", false)
-            put("max_output_tokens", 1024)
+            // Room for a long paragraph twice over plus the list of changes.
+            put("max_output_tokens", 4096)
             // No reasoning keeps a check inside the ~2 s budget.
             if (noReasoning) putJsonObject("reasoning") { put("effort", "none") }
             putJsonObject("text") {

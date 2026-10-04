@@ -21,7 +21,7 @@ class App : Application() {
     private val http by lazy {
         OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
-            .callTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(30, TimeUnit.SECONDS)
             .build()
     }
 
@@ -46,11 +46,17 @@ class App : Application() {
 
     /** Checks [text] with the provider, model and language chosen in settings. Throws CheckFailure. */
     suspend fun check(text: String): CheckResult {
+        if (text.length > MAX_CHARS) throw CheckFailure(CheckFailure.Reason.TooLong)
         // Key decryption and prompt loading happen on first use; keep them off the main thread.
         val (verdict, language) = withContext(Dispatchers.IO) {
             val language = settings.language
             checker().check(text, language?.promptName, settings.punctuation.promptName) to language
         }
         return interpret(text, verdict, language?.name)
+    }
+
+    private companion object {
+        /** About a page. Longer selections are past what this tool is for and would be slow. */
+        const val MAX_CHARS = 3000
     }
 }
