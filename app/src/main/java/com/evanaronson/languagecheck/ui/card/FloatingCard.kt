@@ -3,7 +3,9 @@ package com.evanaronson.languagecheck.ui.card
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -15,34 +17,49 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * The card floating at the bottom of the screen over a dimmed view of the app
- * the text came from. Tapping outside the card calls [onDismiss].
+ * The card floating over a dimmed view of the app the text came from. Tapping
+ * outside the card calls [onDismiss]. [header] sits just above the card.
  */
 @Composable
-fun FloatingCard(state: CardState, actions: CardActions, onDismiss: () -> Unit) {
+fun FloatingCard(
+    state: CardState,
+    actions: CardActions,
+    onDismiss: () -> Unit,
+    alignment: Alignment = Alignment.BottomCenter,
+    /** Extra space at the top, for windows that get no system insets. */
+    topPadding: Dp = 0.dp,
+    header: @Composable () -> Unit = {},
+) {
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.32f))
             .noRippleClickable(onDismiss)
             .safeDrawingPadding()
+            .padding(top = topPadding)
             .padding(16.dp),
-        contentAlignment = Alignment.BottomCenter,
+        contentAlignment = alignment,
     ) {
-        ResultCard(
-            state = state,
-            actions = actions,
-            modifier = Modifier
+        Column(
+            Modifier
                 .widthIn(max = 520.dp)
                 .fillMaxWidth()
-                // Long text scrolls inside the card; keep some of the app visible to tap away.
-                .heightIn(max = maxHeight * 0.85f)
-                // Taps on the card itself shouldn't dismiss it.
+                // Taps on the card or header shouldn't dismiss it.
                 .noRippleClickable {},
-        )
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            header()
+            ResultCard(
+                state = state,
+                actions = actions,
+                // Long text scrolls inside the card; keep some of the app visible to tap away.
+                modifier = Modifier.fillMaxWidth().heightIn(max = maxHeight * 0.8f),
+            )
+        }
     }
 }
 

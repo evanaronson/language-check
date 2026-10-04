@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Only the accessibility button and reading the focused field are needed, so the
+    service asks for the least: it subscribes to one rare event type it ignores.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeAnnouncement"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRequestAccessibilityButton"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_description"
+    android:notificationTimeout="100" />
