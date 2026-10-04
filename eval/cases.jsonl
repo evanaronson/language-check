@@ -9,7 +9,7 @@
 {"text": "Vull fer una pregunta a tu", "status": "ok"}
 {"text": "Hem de prendre una decisió aviat", "status": "ok", "fix": false, "natural": false}
 {"text": "Quedamos mañana a las ocho en la plaza?", "status": "ok", "fix": false, "natural": false}
-{"text": "que tal el finde? nosotros fuimos a la montaña", "status": "ok", "fix": false}
+{"text": "que tal el finde? nosotros fuimos a la montaña", "status": "ok", "fix": true}
 {"text": "Me gusta mucho tu nuevo piso", "status": "ok", "fix": false, "natural": false}
 {"text": "Yo estoy muy cansado hoy porque trabajé mucho", "status": "ok", "fix": false}
 {"text": "Ayer yo fue al cine con mi hermana", "status": "ok", "fix": true}
@@ -23,3 +23,6 @@
 {"text": "Je suis en retard, désolé", "language": "Spanish (Peninsular)", "status": "wrong_language"}
 {"text": "Je suis en retard, désolé", "status": "ok", "fix": false, "natural": false}
 {"text": "Ahir vaig comprar unes tomàquets molt bo", "status": "ok", "fix": true}
+{"text": "Hola qué tal bb estás bien te encanta esta música no?", "status": "ok", "fix": true}
+{"text": "Bon dia com estàs avui vols venir a sopar", "status": "ok", "fix": true}
+{"text": "Ens veiem demà a les set", "status": "ok", "fix": false}

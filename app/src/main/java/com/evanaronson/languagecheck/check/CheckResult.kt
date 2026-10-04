@@ -100,12 +100,30 @@ internal fun locate(text: String, reported: List<ModelChange>): List<Change> {
     for (change in reported) {
         val target = change.to.trim()
         if (target.isEmpty()) continue
-        val index = text.indexOf(target, searchFrom).takeIf { it >= 0 } ?: text.indexOf(target)
-        if (index < 0) continue
+        val index = find(text, target, searchFrom) ?: find(text, target, 0) ?: continue
         val range = index until index + target.length
         if (changes.any { it.range.first <= range.last && range.first <= it.range.last }) continue
         changes += Change(range, change.from.trim().ifEmpty { null }, change.why.trim().ifEmpty { null })
         searchFrom = range.last + 1
     }
     return changes.sortedBy { it.range.first }
+}
+
+/**
+ * Index of [target] in [text] at or after [from], preferring a match that isn't
+ * inside a longer word, so "bien" doesn't land in "también".
+ */
+private fun find(text: String, target: String, from: Int): Int? {
+    var fallback: Int? = null
+    var index = text.indexOf(target, from)
+    while (index >= 0) {
+        val before = text.getOrNull(index - 1)
+        val after = text.getOrNull(index + target.length)
+        val wholeWord = (before == null || !before.isLetter() || !target.first().isLetter()) &&
+            (after == null || !after.isLetter() || !target.last().isLetter())
+        if (wholeWord) return index
+        if (fallback == null) fallback = index
+        index = text.indexOf(target, index + 1)
+    }
+    return fallback
 }

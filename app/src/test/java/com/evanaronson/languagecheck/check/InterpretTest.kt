@@ -71,6 +71,47 @@ class InterpretTest {
     }
 
     @Test
+    fun changesMatchWholeWordsBeforePartsOfWords() {
+        val result = interpret(
+            "tambien esta bien",
+            ModelVerdict(
+                status = "ok",
+                has_errors = true,
+                corrected = "también está bien",
+                fixes = listOf(ModelChange("esta", "está", "Verb needs accent"), ModelChange("tambien", "también", "Accent")),
+            ),
+        ) as CheckResult.Feedback
+
+        val correction = result.correction!!
+        assertEquals(listOf("también", "está"), correction.changes.map { correction.text.substring(it.range) })
+    }
+
+    @Test
+    fun punctuationFixesAreSeparateHighlights() {
+        val result = interpret(
+            "Hola qué tal bb estás bien",
+            ModelVerdict(
+                status = "ok",
+                has_errors = true,
+                corrected = "Hola, ¿qué tal, bb? ¿Estás bien?",
+                fixes = listOf(
+                    ModelChange("Hola qué", "Hola, ¿qué", "Comma, then open the question"),
+                    ModelChange("tal bb", "tal, bb?", "Comma before name; close question"),
+                    ModelChange("estás", "¿Estás", "New question"),
+                    ModelChange("bien", "bien?", "Close question"),
+                ),
+            ),
+        ) as CheckResult.Feedback
+
+        val correction = result.correction!!
+        assertEquals(4, correction.edits)
+        assertEquals(
+            listOf("Hola, ¿qué", "tal, bb?", "¿Estás", "bien?"),
+            correction.changes.map { correction.text.substring(it.range) },
+        )
+    }
+
+    @Test
     fun nothingToSayIsAllGood() {
         val verdict = ModelVerdict(status = "ok", language = "Catalan")
         assertEquals(CheckResult.AllGood, interpret("Ens veiem demà a les set?", verdict))
