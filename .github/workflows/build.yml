@@ -22,7 +22,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
 
       - name: Test and build
-        run: ./gradlew --no-daemon testReleaseUnitTest assembleRelease
+        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk language-check-${{ github.run_number }}.apk
