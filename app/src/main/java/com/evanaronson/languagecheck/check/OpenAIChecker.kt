@@ -34,13 +34,13 @@ class OpenAIChecker(
         val key = apiKey() ?: throw CheckFailure(CheckFailure.Reason.NoKey)
         val model = request.model ?: model()
         val noReasoning = model !in noReasoningControl
-        val request = Request.Builder()
+        val httpRequest = Request.Builder()
             .url("https://api.openai.com/v1/responses")
             .header("Authorization", "Bearer $key")
             .post(body(model, request, noReasoning).toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
-        val (code, payload) = http.newCall(request).await()
+        val (code, payload) = http.newCall(httpRequest).await()
         if (code == 400 && noReasoning && "reasoning" in payload.lowercase()) {
             noReasoningControl += model
             return check(request)
