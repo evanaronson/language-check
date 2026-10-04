@@ -94,7 +94,7 @@ fun HighlightedText(text: String, changes: List<Highlight>, accent: Color, onRep
                 .pointerInput(changes) {
                     detectTapGestures { position ->
                         val result = layout ?: return@detectTapGestures
-                        val hit = changes.firstOrNull { characterAt(result, position) in it.range }
+                        val hit = nearest(result, changes, position, maxDistance = TOUCH_RADIUS.toPx())
                         selectedId = if (hit == null || hit.id == selectedId) null else hit.id
                     }
                 },
@@ -175,21 +175,26 @@ private fun lineBoxes(layout: TextLayoutResult, range: IntRange): List<LineBox> 
 }
 
 /**
- * The character under [position], or -1. getOffsetForPosition gives the
- * nearest caret position, which for a narrow comma is often the one after it.
+ * The highlight closest to [position], if one is within [maxDistance]. A tap on
+ * a highlight always picks it; otherwise a finger-sized miss still reaches a
+ * narrow one such as a lone comma.
  */
-private fun characterAt(layout: TextLayoutResult, position: Offset): Int {
-    val caret = layout.getOffsetForPosition(position)
-    val length = layout.layoutInput.text.length
-    for (candidate in listOf(caret, caret - 1)) {
-        if (candidate !in 0 until length) continue
-        val box = layout.getBoundingBox(candidate)
-        if (position.x >= box.left - 4 && position.x <= box.right + 4 && position.y in box.top..box.bottom) {
-            return candidate
-        }
-    }
-    return -1
+private fun nearest(layout: TextLayoutResult, changes: List<Highlight>, position: Offset, maxDistance: Float): Highlight? =
+    changes
+        .map { change -> change to lineBoxes(layout, change.range).minOfOrNull { distance(it, position) } }
+        .filter { (_, distance) -> distance != null && distance <= maxDistance }
+        .minByOrNull { (_, distance) -> distance!! }
+        ?.first
+
+/** Distance from [point] to [box]; zero inside it. */
+private fun distance(box: LineBox, point: Offset): Float {
+    val dx = maxOf(box.left - point.x, 0f, point.x - box.right)
+    val dy = maxOf(box.top - point.y, 0f, point.y - box.bottom)
+    return kotlin.math.sqrt(dx * dx + dy * dy)
 }
+
+/** How far from a highlight a tap still selects it: roughly a fingertip. */
+private val TOUCH_RADIUS = 24.dp
 
 /** Long enough for the explanation panel's expand animation to finish. */
 private const val EXPAND_MILLIS = 320L
