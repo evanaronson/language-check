@@ -25,6 +25,13 @@ class KeyStorage(context: Context) {
         ?.let { runCatching { decrypt(it) }.getOrNull() }
         ?.also { cache[provider] = it }
 
+    /** What the settings screen shows about a provider's stored key. */
+    fun status(provider: Provider): KeyStatus {
+        if (!prefs.contains(provider.name)) return KeyStatus.None
+        val key = key(provider) ?: return KeyStatus.Unreadable
+        return KeyStatus.Saved(key.takeLast(4))
+    }
+
     fun setKey(provider: Provider, value: String) {
         val key = value.trim()
         if (key.isEmpty()) {
@@ -70,4 +77,13 @@ class KeyStorage(context: Context) {
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val IV_BYTES = 12
     }
+}
+
+sealed interface KeyStatus {
+    data object None : KeyStatus
+
+    /** Stored but can't be decrypted, e.g. after the Keystore key was reset; it must be re-entered. */
+    data object Unreadable : KeyStatus
+
+    data class Saved(val lastFour: String) : KeyStatus
 }

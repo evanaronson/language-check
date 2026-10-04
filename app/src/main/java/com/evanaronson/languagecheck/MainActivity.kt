@@ -88,7 +88,8 @@ private fun Settings(app: App) {
     var loaded by remember { mutableStateOf(false) }
     var language by remember { mutableStateOf<Language?>(null) }
     var provider by remember { mutableStateOf(Provider.Gemini) }
-    var savedKeys by remember { mutableStateOf(emptySet<Provider>()) }
+    var keyStatus by remember { mutableStateOf(emptyMap<Provider, KeyStatus>()) }
+    val savedKeys = keyStatus.filterValues { it is KeyStatus.Saved }.keys
     var model by remember { mutableStateOf<String?>(null) }
     var models by remember { mutableStateOf<ModelList>(ModelList.Loading) }
     var key by remember { mutableStateOf("") }
@@ -102,12 +103,12 @@ private fun Settings(app: App) {
             Triple(
                 app.settings.language,
                 app.settings.provider,
-                Provider.entries.filter { app.keys.key(it) != null }.toSet(),
+                Provider.entries.associateWith { app.keys.status(it) },
             )
         }
         language = state.first
         provider = state.second
-        savedKeys = state.third
+        keyStatus = state.third
         loaded = true
     }
 
@@ -136,8 +137,11 @@ private fun Settings(app: App) {
     fun saveKey(value: String) {
         val target = provider
         scope.launch {
-            withContext(Dispatchers.IO) { app.keys.setKey(target, value) }
-            savedKeys = if (value.isBlank()) savedKeys - target else savedKeys + target
+            val status = withContext(Dispatchers.IO) {
+                app.keys.setKey(target, value)
+                app.keys.status(target)
+            }
+            keyStatus = keyStatus + (target to status)
             key = ""
         }
     }
@@ -206,12 +210,18 @@ private fun Settings(app: App) {
                     RadioButton(selected = option == provider, onClick = null)
                     Spacer(Modifier.width(12.dp))
                     Text(option.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    if (option in savedKeys) {
-                        Text(
-                            "Key saved",
+                    when (val status = keyStatus[option]) {
+                        is KeyStatus.Saved -> Text(
+                            "Key ••••${status.lastFour}",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                         )
+                        KeyStatus.Unreadable -> Text(
+                            "Key unreadable",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        else -> {}
                     }
                 }
             }
@@ -241,13 +251,20 @@ private fun Settings(app: App) {
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             label = { Text("${provider.label} API key") },
-            placeholder = { Text(if (provider in savedKeys) "Saved. Paste to replace" else "Paste key") },
+            placeholder = { Text(if (provider in savedKeys) "Paste to replace" else "Paste key") },
+            supportingText = {
+                when (val status = keyStatus[provider]) {
+                    is KeyStatus.Saved -> Text("Saved key ending in ${status.lastFour}")
+                    KeyStatus.Unreadable -> Text("The saved key can't be read. Paste it again.")
+                    else -> Text("No key saved")
+                }
+            },
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(enabled = key.isNotBlank(), onClick = { saveKey(key) }) { Text("Save") }
-            if (provider in savedKeys) {
+            if (keyStatus[provider].let { it != null && it != KeyStatus.None }) {
                 TextButton(onClick = { saveKey("") }) { Text("Remove") }
             }
             TextButton(onClick = {

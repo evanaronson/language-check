@@ -6,8 +6,11 @@ import android.content.Context
 class AppSettings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
+    // Builds before 4 kept the provider choice alongside the keys.
+    private val legacy = context.getSharedPreferences("keys", Context.MODE_PRIVATE)
+
     var provider: Provider
-        get() = prefs.getString(PROVIDER, null)
+        get() = (prefs.getString(PROVIDER, null) ?: legacy.getString(PROVIDER, null))
             ?.let { name -> Provider.entries.firstOrNull { it.name == name } }
             ?: Provider.Gemini
         set(value) = prefs.edit().putString(PROVIDER, value.name).apply()
