@@ -245,31 +245,30 @@ private fun Settings(app: App) {
             },
         )
 
-        OutlinedTextField(
-            value = key,
-            onValueChange = { key = it },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("${provider.label} API key") },
-            placeholder = { Text(if (provider in savedKeys) "Paste to replace" else "Paste key") },
-            supportingText = {
-                when (val status = keyStatus[provider]) {
-                    is KeyStatus.Saved -> Text("Saved key ending in ${status.lastFour}")
-                    KeyStatus.Unreadable -> Text("The saved key can't be read. Paste it again.")
-                    else -> Text("No key saved")
+        when (val status = keyStatus[provider]) {
+            is KeyStatus.Saved -> SavedKey(provider, status.lastFour, onRemove = { saveKey("") })
+            else -> {
+                OutlinedTextField(
+                    value = key,
+                    onValueChange = { key = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("${provider.label} API key") },
+                    placeholder = { Text("Paste key") },
+                    isError = status == KeyStatus.Unreadable,
+                    supportingText = {
+                        if (status == KeyStatus.Unreadable) Text("The saved key can't be read. Paste it again.")
+                    },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(enabled = key.isNotBlank(), onClick = { saveKey(key) }) { Text("Save") }
+                    TextButton(onClick = {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(provider.keyUrl)))
+                    }) { Text("Get a key") }
                 }
-            },
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = key.isNotBlank(), onClick = { saveKey(key) }) { Text("Save") }
-            if (keyStatus[provider].let { it != null && it != KeyStatus.None }) {
-                TextButton(onClick = { saveKey("") }) { Text("Remove") }
             }
-            TextButton(onClick = {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(provider.keyUrl)))
-            }) { Text("Get a key") }
         }
 
         Section("Try it")
@@ -296,6 +295,37 @@ private fun Settings(app: App) {
                 ),
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+    }
+}
+
+/** Shown instead of the key field once a key is saved. */
+@Composable
+private fun SavedKey(provider: Provider, lastFour: String, onRemove: () -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("✓", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "${provider.label} key saved",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    "Ends in $lastFour",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+            TextButton(onClick = onRemove) { Text("Remove") }
         }
     }
 }
