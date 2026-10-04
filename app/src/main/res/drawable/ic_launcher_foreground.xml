@@ -1,4 +1,4 @@
-<!-- A happy speech bubble wearing an accent mark. -->
+<!-- A happy turnip proofreading with a red pencil. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -7,34 +7,64 @@
     <group
         android:pivotX="54"
         android:pivotY="54"
-        android:scaleX="1.12"
-        android:scaleY="1.12">
+        android:scaleX="1.08"
+        android:scaleY="1.08">
+        <!-- Leaves -->
         <path
-            android:fillColor="#FFF4E6"
-            android:pathData="M44,33h20a15,15 0,0 1,15 15v8a15,15 0,0 1,-15 15H52l-11,9v-9.6A15,15 0,0 1,29 56v-8a15,15 0,0 1,15 -15z" />
+            android:fillColor="#3F9A55"
+            android:pathData="M53,43C45,41 39,35 38,28C45,29 51,35 53,43Z" />
         <path
-            android:fillColor="#3B2622"
-            android:pathData="M46.5,51m-3.6,0a3.6,3.6 0,1 0,7.2 0a3.6,3.6 0,1 0,-7.2 0" />
+            android:fillColor="#3F9A55"
+            android:pathData="M55,43C63,41 69,35 70,28C63,29 57,35 55,43Z" />
         <path
-            android:fillColor="#3B2622"
-            android:pathData="M61.5,51m-3.6,0a3.6,3.6 0,1 0,7.2 0a3.6,3.6 0,1 0,-7.2 0" />
+            android:fillColor="#58B368"
+            android:pathData="M54,43C49,35 49,27 54,20C59,27 59,35 54,43Z" />
+        <!-- Bulb, with a purple top clipped to its outline -->
         <path
-            android:fillAlpha="0.7"
-            android:fillColor="#FF9E86"
-            android:pathData="M41,58m-3,0a3,3 0,1 0,6 0a3,3 0,1 0,-6 0" />
+            android:fillColor="#FFF6EC"
+            android:pathData="M54,40C67,40 76,49 76,61C76,72 66,80 56,82L54,88L52,82C42,80 32,72 32,61C32,49 41,40 54,40Z" />
+        <group>
+            <clip-path android:pathData="M54,40C67,40 76,49 76,61C76,72 66,80 56,82L54,88L52,82C42,80 32,72 32,61C32,49 41,40 54,40Z" />
+            <path
+                android:fillColor="#B65FC4"
+                android:pathData="M28,36H80V51C72,55.5 64,49.5 54,53.5C44,57.5 36,49.5 28,53.5Z" />
+        </group>
+        <!-- Face -->
         <path
-            android:fillAlpha="0.7"
-            android:fillColor="#FF9E86"
-            android:pathData="M67,58m-3,0a3,3 0,1 0,6 0a3,3 0,1 0,-6 0" />
-        <path
-            android:pathData="M49.5,58.5q4.5,4 9,0"
-            android:strokeWidth="2.6"
+            android:pathData="M43.5,64q3,-3.6 6,0M58.5,64q3,-3.6 6,0"
+            android:strokeWidth="2.4"
             android:strokeColor="#3B2622"
             android:strokeLineCap="round" />
         <path
-            android:pathData="M58,27.5l9,-7"
-            android:strokeWidth="5.5"
-            android:strokeColor="#1F6F5C"
+            android:pathData="M51,68.5q3,3 6,0"
+            android:strokeWidth="2.2"
+            android:strokeColor="#3B2622"
             android:strokeLineCap="round" />
+        <path
+            android:fillAlpha="0.75"
+            android:fillColor="#FF8FA3"
+            android:pathData="M41.5,69m-2.8,0a2.8,2.8 0,1 0,5.6 0a2.8,2.8 0,1 0,-5.6 0" />
+        <path
+            android:fillAlpha="0.75"
+            android:fillColor="#FF8FA3"
+            android:pathData="M66.5,69m-2.8,0a2.8,2.8 0,1 0,5.6 0a2.8,2.8 0,1 0,-5.6 0" />
+        <!-- Red proofreading pencil -->
+        <group
+            android:pivotX="76"
+            android:pivotY="70"
+            android:rotation="35">
+            <path
+                android:fillColor="#E5484D"
+                android:pathData="M74.2,56h3.6a1.2,1.2 0,0 1,1.2 1.2v17.6a1.2,1.2 0,0 1,-1.2 1.2h-3.6a1.2,1.2 0,0 1,-1.2 -1.2v-17.6a1.2,1.2 0,0 1,1.2 -1.2z" />
+            <path
+                android:fillColor="#F2A7B0"
+                android:pathData="M74,54h4a1,1 0,0 1,1 1v1.5a1,1 0,0 1,-1 1h-4a1,1 0,0 1,-1 -1v-1.5a1,1 0,0 1,1 -1z" />
+            <path
+                android:fillColor="#F5D6A8"
+                android:pathData="M73,76L79,76L76,82Z" />
+            <path
+                android:fillColor="#3B2622"
+                android:pathData="M75,79.5L77,79.5L76,82Z" />
+        </group>
     </group>
 </vector>
