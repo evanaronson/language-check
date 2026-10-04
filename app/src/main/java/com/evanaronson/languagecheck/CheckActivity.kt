@@ -13,9 +13,9 @@ import com.evanaronson.languagecheck.ui.card.ReviewActions
 import com.evanaronson.languagecheck.ui.copyToClipboard
 
 /**
- * The "Check" entry in the text-selection menu (ACTION_PROCESS_TEXT). Floats
- * the result card over the app the text came from, and hands back the text
- * with any accepted changes when it closes.
+ * Opened from the text-selection menu (ACTION_PROCESS_TEXT) through one of the
+ * entries in [MenuEntry]. Floats the result card over the app the text came
+ * from, and hands back the text with any accepted changes when it closes.
  */
 class CheckActivity : ComponentActivity() {
     private val check: CheckViewModel by viewModels()
@@ -28,9 +28,11 @@ class CheckActivity : ComponentActivity() {
             return
         }
         val readOnly = intent.getBooleanExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, false)
+        // Which menu entry was tapped decides the language: Catalanize, Castilianize, or Linguize to detect it.
+        val entry = (application as App).menu.entryFor(intent.component)
 
         // Start the request before the first frame is drawn.
-        if (check.state == null) check.check(text)
+        if (check.state == null) check.check(text, entry.language)
 
         val actions = CardActions(
             onCopy = {

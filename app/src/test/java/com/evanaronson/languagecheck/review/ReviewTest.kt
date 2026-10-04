@@ -72,7 +72,7 @@ class ReviewTest {
                 hasErrors = true,
                 corrected = "Voy a tomar una ducha y te llamo después",
                 moreNatural = true,
-                natural = "Me voy a duchar y te llamo despues",
+                natural = "Me voy a duchar y te llamo después",
                 naturalChanges = listOf(VerdictChange("Voy a tomar una ducha", "Me voy a duchar", why = "More usual")),
             ),
         ).revision
@@ -99,7 +99,7 @@ class ReviewTest {
                 corrected = "Bon dia! Com estàs amb la pluja?",
                 moreNatural = true,
                 natural = "Bon dia! Com portes la pluja?",
-                naturalChanges = listOf(VerdictChange("estas amb", "portes", why = "Usual way to say it")),
+                naturalChanges = listOf(VerdictChange("estàs amb", "portes", why = "Usual way to say it")),
             ),
         ).revision
         val fix = revision.remaining(EditKind.Fix).single()
@@ -116,6 +116,59 @@ class ReviewTest {
 
         // Undoing the rewording brings the accepted fix back into effect.
         assertEquals("Bon dia! Com estàs amb la pluja?", fixedThenReworded.undo().workingText)
+    }
+
+    @Test
+    fun rewordingsDontRepeatTheFixes() {
+        val original = "Hola bebé estoy en casa y neo está en el suelo y tengo algunas algunas cosas que voy a hacer"
+        val revision = reviewed(
+            original,
+            Verdict(
+                status = Verdict.Status.Ok,
+                hasErrors = true,
+                corrected = "Hola, bebé. Estoy en casa y Neo está en el suelo y tengo algunas cosas que voy a hacer",
+                moreNatural = true,
+                natural = "Hola, bebé. Estoy en casa y Neo está en el suelo y tengo unas cosas que hacer",
+            ),
+        ).revision
+
+        assertEquals(listOf(",", ".", "Estoy", "Neo", "algunas"), revision.replacements(EditKind.Fix))
+        // Only the rewordings, mapped onto the original; the punctuation fixes aren't repeated.
+        val naturals = revision.remaining(EditKind.Natural)
+        assertEquals(listOf("algunas algunas" to "unas", "voy a hacer" to "hacer"), naturals.map { it.from to it.replacement })
+
+        // Accepting the rewordings alone leaves the original's other errors for the fixes.
+        val reworded = revision.acceptAll(EditKind.Natural)
+        assertEquals("Hola bebé estoy en casa y neo está en el suelo y tengo unas cosas que hacer", reworded.workingText)
+        assertEquals(listOf(",", ".", "Estoy", "Neo"), reworded.replacements(EditKind.Fix))
+    }
+
+    @Test
+    fun aRewordingThatUndoesAFixIsDropped() {
+        val revision = reviewed(
+            "te llamo despues",
+            Verdict(
+                status = Verdict.Status.Ok,
+                hasErrors = true,
+                corrected = "te llamo después",
+                moreNatural = true,
+                // Written on the original despite the instructions, so it only undoes the fix.
+                natural = "te llamo despues",
+            ),
+        ).revision
+
+        assertTrue(revision.edits(EditKind.Natural).isEmpty())
+        assertEquals(listOf("después"), revision.replacements(EditKind.Fix))
+    }
+
+    @Test
+    fun deletedConjunctionJoinsTheWordNextToIt() {
+        val revision = reviewed(
+            "en el sofá y neo está tranquilo",
+            Verdict(status = Verdict.Status.Ok, hasErrors = true, corrected = "en el sofá. Neo está tranquilo"),
+        ).revision
+
+        assertEquals(listOf("" to ".", "y neo" to "Neo"), revision.remaining(EditKind.Fix).map { it.from to it.replacement })
     }
 
     @Test

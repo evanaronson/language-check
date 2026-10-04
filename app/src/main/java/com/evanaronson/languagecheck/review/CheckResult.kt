@@ -20,8 +20,8 @@ sealed interface CheckResult {
 
 /**
  * Turns the model's [verdict] into edits of [original]. Fixes and rewordings are
- * both worked out against the original text, so either can be accepted on its
- * own; a "change" that changes nothing produces no edit.
+ * both anchored to the original text, so either can be accepted on its own;
+ * a "change" that changes nothing produces no edit.
  */
 fun interpret(
     original: String,
@@ -42,7 +42,7 @@ fun interpret(
         .orEmpty()
     val naturals = verdict.natural.trim()
         .takeIf { EditKind.Natural in judgments.kinds && verdict.moreNatural && it.isNotEmpty() }
-        ?.let { Edits.naturals(original, it, verdict.naturalChanges, firstId = fixes.size) }
+        ?.let { Edits.naturals(original, fixes, it, verdict.naturalChanges, firstId = fixes.size) }
         .orEmpty()
 
     return CheckResult.Reviewed(

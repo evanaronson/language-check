@@ -32,12 +32,15 @@ data class Edit(
 /** Text with edits applied, and the range each edit's replacement occupies in it. */
 data class Rendered(val text: String, val ranges: Map<Int, IntRange>)
 
-/** Applies non-overlapping [edits] to [original]; an insertion goes before a replacement at the same place. */
+/** Text order; an insertion goes before a replacement starting at the same place. */
+internal val editOrder = compareBy<Edit>({ it.start }, { if (it.isInsertion) 0 else 1 })
+
+/** Applies non-overlapping [edits] to [original]. */
 internal fun render(original: String, edits: List<Edit>): Rendered {
     val out = StringBuilder()
     val ranges = mutableMapOf<Int, IntRange>()
     var pos = 0
-    for (edit in edits.sortedWith(compareBy({ it.start }, { if (it.isInsertion) 0 else 1 }))) {
+    for (edit in edits.sortedWith(editOrder)) {
         if (edit.start < pos) continue
         out.append(original, pos, edit.start)
         val start = out.length

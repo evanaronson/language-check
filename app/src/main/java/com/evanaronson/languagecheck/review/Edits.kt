@@ -4,48 +4,77 @@ import com.evanaronson.languagecheck.review.Alignment.Op
 import com.evanaronson.languagecheck.review.Alignment.Type
 
 /**
- * Turns the model's full corrected or natural text into edits of the original,
- * so positions never depend on the model reporting them; its change list only
- * supplies reasons.
+ * Turns the model's full corrected and natural texts into edits of the
+ * original, so positions never depend on the model reporting them; its change
+ * lists only supply reasons.
  */
 internal object Edits {
     /** One edit per changed word and one per punctuation mark. */
-    fun fixes(original: String, target: String, reported: List<VerdictChange>, firstId: Int = 0): List<Edit> =
-        withReasons(spans(original, target, atomic = true), reported, EditKind.Fix, firstId)
+    fun fixes(original: String, corrected: String, reported: List<VerdictChange>, firstId: Int = 0): List<Edit> {
+        val spans = spans(original, corrected, atomic = true).map { tidy(original, it) }
+        return toEdits(spans, reported, EditKind.Fix, firstId)
+    }
 
     /**
-     * Phrase-level rewordings. Uses the model's own list when it accounts for
-     * the whole natural text, otherwise falls back to aligning the two texts.
+     * Phrase-level rewordings. The natural text is written on top of the
+     * corrected one, so rewordings are found against the corrected text (where
+     * the fixes cancel out) and then mapped back onto the original. A rewording
+     * that covers a fixed word takes in that word's original form.
      */
-    fun naturals(original: String, target: String, reported: List<VerdictChange>, firstId: Int = 0): List<Edit> =
-        located(original, target, reported, firstId)
-            ?: withReasons(spans(original, target, atomic = false), reported, EditKind.Natural, firstId)
+    fun naturals(
+        original: String,
+        fixes: List<Edit>,
+        natural: String,
+        reported: List<VerdictChange>,
+        firstId: Int = 0,
+    ): List<Edit> {
+        val base = render(original, fixes).text
+        val placed = place(fixes)
+        val spans = (located(base, natural, reported) ?: spans(base, natural, atomic = false))
+            .map { tidy(original, toOriginal(it, base, original, placed)) }
+            // Changes that only restate a fix, or undo one, don't change the original.
+            .filter { it.from != it.replacement }
+        return toEdits(spans, reported, EditKind.Natural, firstId)
+    }
 
-    private data class Span(val start: Int, val end: Int, val from: String, val replacement: String)
+    private data class Span(
+        val start: Int,
+        val end: Int,
+        val from: String,
+        val replacement: String,
+        val why: String? = null,
+    )
 
-    /** The model's rewordings found in the original, or null if they don't produce [target]. */
-    private fun located(original: String, target: String, reported: List<VerdictChange>, firstId: Int): List<Edit>? {
+    private fun toEdits(spans: List<Span>, reported: List<VerdictChange>, kind: EditKind, firstId: Int): List<Edit> {
+        val unused = reported.toMutableList()
+        return spans.mapIndexed { index, span ->
+            val why = span.why ?: bestMatch(span, unused)?.also { unused.remove(it) }?.let(::reason)
+            Edit(firstId + index, kind, span.start, span.end, span.from, span.replacement, why)
+        }
+    }
+
+    /** The model's rewordings found in [base], or null unless applying them produces [target]. */
+    private fun located(base: String, target: String, reported: List<VerdictChange>): List<Span>? {
         if (reported.isEmpty()) return null
-        val edits = mutableListOf<Edit>()
+        val spans = mutableListOf<Span>()
         var searchFrom = 0
         for (change in reported) {
             val from = change.from.trim()
             if (from.isEmpty()) return null
-            val at = find(original, from, searchFrom) ?: find(original, from, 0) ?: return null
-            val edit = Edit(firstId + edits.size, EditKind.Natural, at, at + from.length, from, change.to.trim(), reason(change))
-            if (edits.any { it.overlaps(edit) }) return null
-            edits += edit
-            searchFrom = edit.end
+            val at = find(base, from, searchFrom) ?: find(base, from, 0) ?: return null
+            if (spans.any { at < it.end && it.start < at + from.length }) return null
+            spans += Span(at, at + from.length, from, change.to.trim(), reason(change))
+            searchFrom = at + from.length
         }
-        return edits.takeIf { render(original, it).text.trim() == target.trim() }
-    }
-
-    private fun withReasons(spans: List<Span>, reported: List<VerdictChange>, kind: EditKind, firstId: Int): List<Edit> {
-        val unused = reported.toMutableList()
-        return spans.mapIndexed { index, span ->
-            val match = bestMatch(span, unused)?.also { unused.remove(it) }
-            Edit(firstId + index, kind, span.start, span.end, span.from, span.replacement, match?.let(::reason))
+        spans.sortBy { it.start }
+        val applied = StringBuilder()
+        var pos = 0
+        for (span in spans) {
+            applied.append(base, pos, span.start).append(span.replacement)
+            pos = span.end
         }
+        applied.append(base, pos, base.length)
+        return spans.takeIf { applied.toString().trim() == target.trim() }
     }
 
     private fun bestMatch(span: Span, candidates: List<VerdictChange>): VerdictChange? {
@@ -62,12 +91,60 @@ internal object Edits {
 
     private fun reason(change: VerdictChange) = change.why.trim().ifEmpty { null }
 
-    /** Groups the alignment's changes into spans: atomic for fixes, whole phrases for rewordings. */
-    private fun spans(original: String, target: String, atomic: Boolean): List<Span> {
-        val ops = Alignment.align(original, target)
+    // --- Mapping corrected-text positions back to the original -------------
+
+    /** A fix and where its replacement sits in the corrected text. */
+    private data class Placed(val fix: Edit, val baseStart: Int, val baseEnd: Int)
+
+    private fun place(fixes: List<Edit>): List<Placed> {
+        var delta = 0
+        return fixes.sortedWith(editOrder).map { fix ->
+            val start = fix.start + delta
+            delta += fix.replacement.length - (fix.end - fix.start)
+            Placed(fix, start, start + fix.replacement.length)
+        }
+    }
+
+    /** [span] is in corrected-text positions; the result is in original positions. */
+    private fun toOriginal(span: Span, base: String, original: String, placed: List<Placed>): Span {
+        // A span edge inside a fix's replacement widens to take in the whole fix.
+        var start = span.start
+        var end = span.end
+        var prefix = ""
+        var suffix = ""
+        for (p in placed) {
+            if (p.baseStart < start && start < p.baseEnd) {
+                prefix = base.substring(p.baseStart, start)
+                start = p.baseStart
+            }
+            if (p.baseStart < end && end < p.baseEnd) {
+                suffix = base.substring(end, p.baseEnd)
+                end = p.baseEnd
+            }
+        }
+        val from = originalPosition(start, placed)
+        val to = originalPosition(end, placed)
+        return Span(from, to, original.substring(from, to), prefix + span.replacement + suffix, span.why)
+    }
+
+    /** Maps a corrected-text position that isn't inside any fix to the original. */
+    private fun originalPosition(position: Int, placed: List<Placed>): Int {
+        var delta = 0
+        for (p in placed) {
+            if (position <= p.baseStart) return position - (p.baseStart - p.fix.start)
+            delta = p.baseEnd - p.fix.end
+        }
+        return position - delta
+    }
+
+    // --- Grouping the alignment into spans ---------------------------------
+
+    /** Spans of [base] that change to reach [target]: atomic for fixes, whole phrases for rewordings. */
+    private fun spans(base: String, target: String, atomic: Boolean): List<Span> {
+        val ops = Alignment.align(base, target)
         if (ops.isEmpty()) return emptyList()
 
-        // Position in the original before each op, for placing insertions.
+        // Position in the base text before each op, for placing insertions.
         val before = IntArray(ops.size)
         var pos = 0
         ops.forEachIndexed { k, op ->
@@ -75,12 +152,11 @@ internal object Edits {
             op.a?.let { pos = it.end }
         }
 
-        val groups = group(ops, atomic)
-        return groups.map { group ->
+        return group(ops, atomic).map { group ->
             val removed = (group[0]..group[1]).mapNotNull { ops[it].a }
             val start = removed.firstOrNull()?.start ?: before[group[0]]
             val end = removed.lastOrNull()?.end ?: start
-            tidy(original, Span(start, end, original.substring(start, end), replacement(ops, group)))
+            Span(start, end, base.substring(start, end), replacement(ops, group))
         }
     }
 
@@ -114,15 +190,31 @@ internal object Edits {
             if (onlySpace && previous != null && previous[1] == group[0] - 1) previous[1] = group[1] else joined += group
         }
 
-        // A pure deletion has nothing to show, so it grows to include the next unchanged word.
+        // A pure deletion has nothing to show, so it joins the word change next to it
+        // ("y neo" → "Neo"), or else grows to include the nearest unchanged word.
+        fun isKeptSpace(k: Int) = ops[k].isMatch && ops[k].token.type == Type.Space
         fun isKeptWord(k: Int) = ops[k].isMatch && ops[k].token.type == Type.Word
+        fun wordGroupAt(k: Int) = joined.firstOrNull { k in it[0]..it[1] }
+            ?.takeIf { group -> (group[0]..group[1]).none { ops[it].isPunct } }
         for (group in joined) {
             if (replacement(ops, group).isNotEmpty()) continue
-            val next = (group[1] + 1 until ops.size).firstOrNull(::isKeptWord)
-            if (next != null) {
-                group[1] = next
-            } else {
-                (group[0] - 1 downTo 0).firstOrNull(::isKeptWord)?.let { group[0] = it }
+            var after = group[1] + 1
+            while (after < ops.size && isKeptSpace(after)) after++
+            var before = group[0] - 1
+            while (before >= 0 && isKeptSpace(before)) before--
+            val next = if (after < ops.size && !ops[after].isMatch) wordGroupAt(after) else null
+            val previous = if (before >= 0 && !ops[before].isMatch) wordGroupAt(before) else null
+            when {
+                next != null -> group[1] = next[1]
+                previous != null -> group[0] = previous[0]
+                else -> {
+                    val kept = (group[1] + 1 until ops.size).firstOrNull(::isKeptWord)
+                    if (kept != null) {
+                        group[1] = kept
+                    } else {
+                        (group[0] - 1 downTo 0).firstOrNull(::isKeptWord)?.let { group[0] = it }
+                    }
+                }
             }
         }
 
@@ -138,7 +230,7 @@ internal object Edits {
         (group[0]..group[1]).mapNotNull { ops[it].b?.text }.joinToString("")
 
     /** Keeps spaces out of highlights: "␣estas amb" → "␣portes" becomes "estas amb" → "portes". */
-    private fun tidy(original: String, span: Span): Span {
+    private fun tidy(text: String, span: Span): Span {
         var (start, end, from, replacement) = span
         while (from.isNotEmpty() && replacement.isNotEmpty() && from[0] == replacement[0] && from[0].isWhitespace()) {
             from = from.drop(1)
@@ -151,12 +243,12 @@ internal object Edits {
             end--
         }
         // An inserted "␣al" before a space is the same as "al␣" after it.
-        if (start == end && replacement.length > 1 && replacement[0].isWhitespace() && original.getOrNull(start) == replacement[0]) {
+        if (start == end && replacement.length > 1 && replacement[0].isWhitespace() && text.getOrNull(start) == replacement[0]) {
             replacement = replacement.drop(1) + replacement[0]
             start++
             end++
         }
-        return Span(start, end, from, replacement)
+        return span.copy(start = start, end = end, from = from, replacement = replacement)
     }
 
     /**

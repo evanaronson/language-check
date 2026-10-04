@@ -23,7 +23,9 @@ Possible results: **Looks good**; fixes and/or a more natural rewording, each ch
 
 Fixes and rewordings are both worked out against the original text, so they're independent: tap a highlight to see why and **Replace** just that change, or **Replace all** for a whole section. Accepted changes disappear from the list; **Undo** reverts the last action, and closing the card in any way (Done, back, tapping outside) hands the text with accepted changes back to the app. A rewording that covers a fixed word takes precedence over that fix.
 
-Settings has a language picker (auto-detect, or pin Catalan or Spanish), a punctuation level (Strict, Moderate or Casual), which judgments to make (fix, naturalize or both), and a model picker that lists the models your key can use, live from the provider. Picking a model runs a short test check and shows how long it took, or the provider's error.
+The selection menu can show several entries: **Linguize** (detects the language), **Catalanize** and **Castilianize**. Pick which ones appear in settings; tapping one checks the text as that language. Each entry is an `activity-alias` of `CheckActivity` in the manifest, switched on and off by `SelectionMenu`; adding a language means a `Language`, a `MenuEntry`, an alias and a label.
+
+Settings also has a punctuation level (Strict, Moderate or Casual), which judgments to make (fix, naturalize or both), and a model picker that lists the models your key can use, live from the provider. Picking a model runs a short test check and shows how long it took, or the provider's error.
 
 ## Code layout
 
@@ -31,10 +33,10 @@ Packages under `app/src/main/java/com/evanaronson/languagecheck/`, each dependin
 
 | Package | Responsibility |
 |---|---|
-| `review/` | The core, with no Android or network code. `Verdict` is the model's answer as the schema defines it; `Edits` and `Alignment` turn it into `Edit`s anchored to the original text (positions come from aligning the texts, never from the model; every punctuation mark is its own fix); `Revision` tracks which edits are accepted; `interpret()` produces a `CheckResult`. Also the check options: `Language`, `Punctuation`, `Judgments`. |
+| `review/` | The core, with no Android or network code. `Verdict` is the model's answer as the schema defines it; `Edits` and `Alignment` turn it into `Edit`s anchored to the original text (positions come from aligning the texts, never from the model; every punctuation mark is its own fix; rewordings are found against the corrected text, so fixes never repeat in them, then mapped back onto the original); `Revision` tracks which edits are accepted; `interpret()` produces a `CheckResult`. Also the check options: `Language`, `Punctuation`, `Judgments`. |
 | `llm/` | Talking to models. `Prompt` is the contract: instructions and schema from `assets/`, the user-message format, and reading answers. `GeminiClient` and `OpenAIClient` implement `ProviderClient` (check, list models) over plain REST; adding a provider means one more client. |
 | `settings/` | `Settings` (choices) and `ApiKeys` (keys encrypted with an Android Keystore key). |
-| root | `CheckService` runs a check with the chosen provider, model and options; `App` creates the long-lived objects; `CheckActivity` is the selection-menu entry; `MainActivity` hosts settings. |
+| root | `CheckService` runs a check with the chosen provider, model and options; `SelectionMenu` turns the menu entries on and off; `App` creates the long-lived objects; `CheckActivity` opens from a menu entry; `MainActivity` hosts settings. |
 | `ui/` | `card/`: the result card and its `CheckViewModel`, which owns the check and the accepted changes. `settings/`: the settings screen and its `SettingsViewModel`. `components/`: shared controls. |
 
 The prompt and schema live in `app/src/main/assets/` so the eval script uses exactly what the app sends.

@@ -19,9 +19,13 @@ Question: what is the minimum change needed to make the writer's own text correc
 - Fix genuine errors: spelling (including missing or wrong accents), grammar, agreement, verb forms, syntax, wrong prepositions, wrong words, or anything that would confuse a native reader.
 - Judge punctuation and capitalisation at the level the `Punctuation:` line gives:
   - `strict`: standard written punctuation and capitalisation throughout, including opening ¿ and ¡ in Spanish, a capital first letter and a full stop at the end.
-  - `moderate`: separate run-on sentences, end questions with ? and exclamations with !, add commas the grammar needs (around a person being addressed, before a tag question like "no?"), and capitalise each sentence after the first. Do not require opening ¿ or ¡, a capital first letter, or a full stop at the very end.
+  - `moderate`: separate sentences that are run together with no connecting word (for example a greeting running straight into the message), end questions with ? and exclamations with !, add the commas the grammar requires (around a person being addressed, before a tag question like "no?"), and capitalise each sentence after the first. Do not require opening ¿ or ¡, a capital first letter, or a full stop at the very end.
   - `casual`: leave punctuation and capitalisation alone unless their absence would genuinely confuse a reader.
-- At every level, emoji and common chat abbreviations such as "bb", "q" or "finde" are not errors.
+- At every level:
+  - Clauses joined by a conjunction ("y", "i", "pero", "que"…) are not run-ons, however long the chain. Never delete, add or replace a conjunction to split or join sentences; a long chain of "y" is a matter of style for step 3, not an error.
+  - Optional punctuation is never a fix. Add a comma only where the grammar requires one; in particular, no comma before "y" or "i" joining clauses that share a subject.
+  - Emoji and common chat abbreviations such as "bb", "q" or "finde" are not errors.
+  - Names of people, pets and places take a capital letter.
 - Preserve the writer's wording, word order and tone everywhere else. Change as few words as possible.
 - Do not change anything because another way of saying it sounds better. Naturalness is never evidence of an error.
 - If the text is already correct and understandable, set `has_errors` to false, `corrected` to an empty string and `fixes` to an empty list.
@@ -33,9 +37,11 @@ Question: independently of correctness, does the writer's phrasing sound like so
 
 - The bar is high. Offer an alternative only when it is clearly and usefully better: a calque from English, an expression natives would find odd, a construction that is correct but stilted. Do not offer one merely because a different phrasing is possible.
 - When in doubt, say it sounds natural. Telling a learner that valid, normal language is inadequate is a worse mistake than missing a small improvement.
-- If you offer an alternative, work from the writer's original text, not the corrected one. Reword only the phrases that need it and leave everything else exactly as written, including any errors outside those phrases. A phrase you reword must itself be correct. Keep the writer's meaning and register, and give exactly one alternative.
+- If you offer an alternative, work on top of your corrected text (or the original text if you made no corrections or the `Checks:` line is `naturalize`). Reword only the phrases that need it and leave everything else exactly as it is. A phrase you reword must itself be correct. Keep the writer's meaning and register, and give exactly one alternative.
+- When the `Checks:` line is `naturalize`, do not correct errors outside the phrases you reword.
+- Splitting a long chain of clauses into sentences counts as a rewording, and only when it clearly reads better.
 - If the text sounds reasonably natural, set `more_natural` to false, `natural` to an empty string and `natural_changes` to an empty list.
-- Otherwise set `more_natural` to true, `natural` to the writer's original text with only your rewordings applied, and list each rewording in `natural_changes`, in order, with `from` copied exactly from the original text.
+- Otherwise set `more_natural` to true, `natural` to the text you started from with only your rewordings applied, and list each rewording in `natural_changes`, in order, with `from` copied exactly from the text you started from.
 
 ## Listing changes
 
@@ -63,7 +69,7 @@ Language: auto
 Punctuation: moderate
 Checks: both
 Text: Bon dia! Com estas amb la pluja?
-{"status":"ok","has_errors":true,"corrected":"Bon dia! Com estàs amb la pluja?","fixes":[{"from":"estas","to":"estàs","why":"Missing accent"}],"more_natural":true,"natural":"Bon dia! Com portes la pluja?","natural_changes":[{"from":"estas amb","to":"portes","why":"Usual way to say it"}]}
+{"status":"ok","has_errors":true,"corrected":"Bon dia! Com estàs amb la pluja?","fixes":[{"from":"estas","to":"estàs","why":"Missing accent"}],"more_natural":true,"natural":"Bon dia! Com portes la pluja?","natural_changes":[{"from":"estàs amb","to":"portes","why":"Usual way to say it"}]}
 
 Language: Catalan (standard Central Catalan)
 Punctuation: moderate
@@ -81,7 +87,7 @@ Language: auto
 Punctuation: moderate
 Checks: both
 Text: Voy a tomar una ducha y te llamo despues
-{"status":"ok","has_errors":true,"corrected":"Voy a tomar una ducha y te llamo después","fixes":[{"from":"despues","to":"después","why":"Missing accent"}],"more_natural":true,"natural":"Me voy a duchar y te llamo despues","natural_changes":[{"from":"Voy a tomar una ducha","to":"Me voy a duchar","why":"More usual in Spain"}]}
+{"status":"ok","has_errors":true,"corrected":"Voy a tomar una ducha y te llamo después","fixes":[{"from":"despues","to":"después","why":"Missing accent"}],"more_natural":true,"natural":"Me voy a duchar y te llamo después","natural_changes":[{"from":"Voy a tomar una ducha","to":"Me voy a duchar","why":"More usual in Spain"}]}
 
 Language: auto
 Punctuation: moderate
@@ -100,6 +106,12 @@ Punctuation: moderate
 Checks: both
 Text: hola q tal bb estas bien te encanta esta musica no
 {"status":"ok","has_errors":true,"corrected":"hola, q tal, bb? Estás bien? Te encanta esta música, no?","fixes":[{"from":"","to":",","why":"Comma after greeting"},{"from":"","to":",","why":"Comma before a name"},{"from":"","to":"?","why":"End of question"},{"from":"estas","to":"Estás","why":"Capital and accent"},{"from":"","to":"?","why":"End of question"},{"from":"te","to":"Te","why":"New sentence, capital"},{"from":"musica","to":"música","why":"Missing accent"},{"from":"","to":",","why":"Comma before a tag question"},{"from":"","to":"?","why":"End of question"}],"more_natural":false,"natural":"","natural_changes":[]}
+
+Language: auto
+Punctuation: moderate
+Checks: both
+Text: Hola bebé estoy aquí en casa en el sofá y neo está tranquilo en el suelo y tengo algunas cosas que voy a hacer en el ordenador y después me encuentro con Charles y vamos a tomar algunas algunas cervezas en un picnic y vamos a comer algunos snacks de de una bodega o algo
+{"status":"ok","has_errors":true,"corrected":"Hola, bebé. Estoy aquí en casa en el sofá y Neo está tranquilo en el suelo y tengo algunas cosas que voy a hacer en el ordenador y después me encuentro con Charles y vamos a tomar algunas cervezas en un picnic y vamos a comer algunos snacks de una bodega o algo","fixes":[{"from":"","to":",","why":"Comma before the person addressed"},{"from":"","to":".","why":"Greeting ends a sentence"},{"from":"estoy","to":"Estoy","why":"New sentence, capital"},{"from":"neo","to":"Neo","why":"Names take a capital"},{"from":"algunas algunas","to":"algunas","why":"Repeated word"},{"from":"de de","to":"de","why":"Repeated word"}],"more_natural":true,"natural":"Hola, bebé. Estoy aquí en casa en el sofá y Neo está tranquilo en el suelo y tengo algunas cosas que hacer en el ordenador y después he quedado con Charles y vamos a tomar unas cervezas en un picnic y a comer unos snacks de una tienda o algo","natural_changes":[{"from":"que voy a hacer","to":"que hacer","why":"Usual way to say it"},{"from":"me encuentro","to":"he quedado","why":"\"Quedar con\" for plans"},{"from":"algunas cervezas","to":"unas cervezas","why":"\"Algunas\" is a calque"},{"from":"y vamos a comer","to":"y a comer","why":"Avoids repeating \"vamos\""},{"from":"algunos","to":"unos","why":"\"Algunos\" is a calque"},{"from":"bodega","to":"tienda","why":"Bodega means wine shop in Spain"}]}
 
 Language: auto
 Punctuation: strict

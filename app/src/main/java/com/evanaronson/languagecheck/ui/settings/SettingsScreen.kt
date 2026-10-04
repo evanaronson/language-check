@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,13 +31,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.evanaronson.languagecheck.MenuEntry
 import com.evanaronson.languagecheck.llm.Provider
 import com.evanaronson.languagecheck.review.Judgments
-import com.evanaronson.languagecheck.review.Language
 import com.evanaronson.languagecheck.review.Punctuation
 import com.evanaronson.languagecheck.settings.KeyStatus
 import com.evanaronson.languagecheck.ui.card.CardActions
@@ -43,6 +46,7 @@ import com.evanaronson.languagecheck.ui.card.CheckViewModel
 import com.evanaronson.languagecheck.ui.card.ResultCard
 import com.evanaronson.languagecheck.ui.card.ReviewActions
 import com.evanaronson.languagecheck.ui.components.Dropdown
+import com.evanaronson.languagecheck.ui.components.MultiSelectDropdown
 import com.evanaronson.languagecheck.ui.components.RadioRow
 import com.evanaronson.languagecheck.ui.components.SectionTitle
 import com.evanaronson.languagecheck.ui.copyToClipboard
@@ -67,19 +71,20 @@ fun SettingsScreen(settings: SettingsViewModel, check: CheckViewModel) {
         )
         CheckingSection(state, settings)
         ModelSection(state, settings)
-        TryItSection(check)
+        TryItSection(state.menu, check)
     }
 }
 
 @Composable
 private fun CheckingSection(state: SettingsState, settings: SettingsViewModel) {
     SectionTitle("Checking")
-    Dropdown(
-        label = "Check text as",
-        selected = state.language?.name ?: AUTO_DETECT,
-        options = listOf<Language?>(null) + Language.all,
-        optionLabel = { it?.name ?: AUTO_DETECT },
-        onSelect = settings::setLanguage,
+    val labels = menuLabels()
+    MultiSelectDropdown(
+        label = "In the selection menu",
+        options = MenuEntry.entries,
+        selected = state.menu,
+        optionLabel = { entry -> "${labels.getValue(entry)} (${entry.language?.name ?: "auto-detect"})" },
+        onToggle = settings::toggleMenuEntry,
     )
     Dropdown(
         label = "Punctuation",
@@ -225,8 +230,9 @@ private fun SavedKey(provider: Provider, lastFour: String, onRemove: () -> Unit)
 }
 
 /** A text box and the same card the selection menu shows, so checks can be tried here. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TryItSection(check: CheckViewModel) {
+private fun TryItSection(menu: Set<MenuEntry>, check: CheckViewModel) {
     val context = LocalContext.current
     var sample by rememberSaveable { mutableStateOf(SAMPLE) }
 
@@ -237,7 +243,15 @@ private fun TryItSection(check: CheckViewModel) {
 
     SectionTitle("Try it")
     OutlinedTextField(value = sample, onValueChange = { sample = it }, modifier = Modifier.fillMaxWidth(), minLines = 2)
-    Button(onClick = { sample.trim().takeIf { it.isNotEmpty() }?.let(check::check) }) { Text("Check") }
+    // One button per selection-menu entry, so a check here works exactly like one from the menu.
+    val labels = menuLabels()
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        MenuEntry.entries.filter { it in menu }.forEach { entry ->
+            Button(onClick = { sample.trim().takeIf { it.isNotEmpty() }?.let { check.check(it, entry.language) } }) {
+                Text(labels.getValue(entry))
+            }
+        }
+    }
 
     check.state?.let { state ->
         ResultCard(
@@ -259,5 +273,7 @@ private fun TryItSection(check: CheckViewModel) {
     }
 }
 
-private const val AUTO_DETECT = "Auto-detect"
+@Composable
+private fun menuLabels(): Map<MenuEntry, String> = MenuEntry.entries.associateWith { stringResource(it.label) }
+
 private const val SAMPLE = "Bon dia! Com estas amb la pluja?"

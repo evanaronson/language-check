@@ -54,7 +54,7 @@ fun ResultCard(
                         is CheckResult.Reviewed -> ReviewContent(result, actions)
                         CheckResult.Unclear -> Verdict(Mark.Unsure, "Can't tell what this means")
                         is CheckResult.WrongLanguage ->
-                            Verdict(Mark.Unsure, "Not ${result.expected}", "Change the language in settings")
+                            Verdict(Mark.Unsure, "Not ${result.expected}", "Try Linguize to detect the language")
                     }
                 }
             }

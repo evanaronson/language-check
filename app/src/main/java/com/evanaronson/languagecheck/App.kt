@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit
 class App : Application() {
     val settings by lazy { Settings(this) }
     val keys by lazy { ApiKeys(this) }
+    val menu by lazy { SelectionMenu(this) }
 
     val checks by lazy {
         // One HTTP client for the life of the process, so repeat checks reuse the open connection.

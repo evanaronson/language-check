@@ -1,6 +1,7 @@
 package com.evanaronson.languagecheck.ui.card
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,10 +10,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,6 +35,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
 /** One change shown in the text: where it sits, what it replaced, and why. */
 data class Highlight(val id: Int, val range: IntRange, val from: String, val why: String?)
@@ -40,6 +45,7 @@ data class Highlight(val id: Int, val range: IntRange, val from: String, val why
  * adjacent changes read as distinct blocks. Tapping a highlight shows why,
  * with a Replace button to accept just that change when [onReplace] is set.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HighlightedText(text: String, changes: List<Highlight>, accent: Color, onReplace: ((Int) -> Unit)?) {
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -95,9 +101,18 @@ fun HighlightedText(text: String, changes: List<Highlight>, accent: Color, onRep
         )
 
         val shown = selected?.let { changes.getOrNull(it) }
+        // Whenever a highlight is tapped, scroll (the card, or the screen around it) so its
+        // explanation and Replace button are fully visible, once the panel has opened.
+        val explanation = remember { BringIntoViewRequester() }
+        LaunchedEffect(selectedId) {
+            if (selectedId != null) {
+                delay(EXPAND_MILLIS)
+                explanation.bringIntoView()
+            }
+        }
         AnimatedVisibility(visible = shown != null) {
             val change = shown ?: return@AnimatedVisibility
-            Column {
+            Column(Modifier.bringIntoViewRequester(explanation)) {
                 Spacer(Modifier.height(8.dp))
                 Explanation(
                     change,
@@ -175,3 +190,6 @@ private fun characterAt(layout: TextLayoutResult, position: Offset): Int {
     }
     return -1
 }
+
+/** Long enough for the explanation panel's expand animation to finish. */
+private const val EXPAND_MILLIS = 320L

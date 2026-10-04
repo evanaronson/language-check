@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -73,6 +74,41 @@ fun <T> Dropdown(label: String, selected: String, options: List<T>, optionLabel:
                         expanded = false
                         onSelect(option)
                     },
+                )
+            }
+        }
+    }
+}
+
+/** A dropdown of checkboxes; the menu stays open while options are toggled. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun <T> MultiSelectDropdown(
+    label: String,
+    options: List<T>,
+    selected: Set<T>,
+    optionLabel: (T) -> String,
+    onToggle: (T) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = options.filter { it in selected }.joinToString(", ", transform = optionLabel),
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(optionLabel(option)) },
+                    leadingIcon = { Checkbox(checked = option in selected, onCheckedChange = null) },
+                    onClick = { onToggle(option) },
                 )
             }
         }

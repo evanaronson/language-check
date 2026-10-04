@@ -8,7 +8,8 @@ judgment mismatches and latency.
 Each case may set "language" (as the app's language setting names it; default
 auto), "punctuation" (strict, moderate or casual; default moderate), "checks"
 (both, fix or naturalize; default both), "status", "fix" (a correction is expected or not) and "natural" (a more
-natural alternative is expected or not). Omitted fields aren't checked. "natural": false cases are the important ones: they catch the
+natural alternative is expected or not) and "max_fixes" (more fixes than this
+means style is being counted as errors). Omitted fields aren't checked. "natural": false cases are the important ones: they catch the
 app nagging about language that is already fine.
 """
 import argparse
@@ -116,6 +117,8 @@ def main():
             problems.append(f"fix {verdict['has_errors']} != {case['fix']}")
         if "natural" in case and verdict["more_natural"] != case["natural"]:
             problems.append(f"natural {verdict['more_natural']} != {case['natural']}")
+        if "max_fixes" in case and len(verdict["fixes"]) > case["max_fixes"]:
+            problems.append(f"{len(verdict['fixes'])} fixes > {case['max_fixes']} (style counted as errors?)")
         failures += bool(problems)
         mark = "MISS " if problems else "ok   "
         print(f"{mark}{elapsed:4.1f}s  {case['text']}")

@@ -1,6 +1,6 @@
 package com.evanaronson.languagecheck.review
 
-/** A language checks can be pinned to; none chosen means the model detects it. */
+/** A language a check can be pinned to; none means the model detects it. */
 data class Language(
     val code: String,
     val name: String,
@@ -8,11 +8,7 @@ data class Language(
     val variety: String,
 ) {
     companion object {
-        val all = listOf(
-            Language("ca", "Catalan", "standard Central Catalan"),
-            Language("es", "Spanish", "Peninsular"),
-        )
-
-        fun byCode(code: String?) = all.firstOrNull { it.code == code }
+        val Catalan = Language("ca", "Catalan", "standard Central Catalan")
+        val Spanish = Language("es", "Spanish", "Peninsular")
     }
 }

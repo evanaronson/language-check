@@ -22,19 +22,54 @@
             </intent-filter>
         </activity>
 
-        <!-- The label is what appears in the text-selection menu. -->
         <activity
             android:name=".CheckActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode"
             android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/Theme.LanguageCheck.Overlay" />
+
+        <!--
+            Text-selection menu entries. Each label appears in the menu; settings switches
+            them on and off (see SelectionMenu.kt). Only auto-detect is on to begin with.
+        -->
+        <activity-alias
+            android:name=".LinguizeEntry"
+            android:enabled="true"
             android:exported="true"
-            android:label="@string/check_action"
-            android:theme="@style/Theme.LanguageCheck.Overlay">
+            android:label="@string/menu_auto"
+            android:targetActivity=".CheckActivity">
             <intent-filter>
                 <action android:name="android.intent.action.PROCESS_TEXT" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".CatalanizeEntry"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/menu_catalan"
+            android:targetActivity=".CheckActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".CastilianizeEntry"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/menu_castilian"
+            android:targetActivity=".CheckActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>

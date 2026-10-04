@@ -3,10 +3,12 @@ package com.evanaronson.languagecheck.settings
 import android.content.Context
 import com.evanaronson.languagecheck.llm.Provider
 import com.evanaronson.languagecheck.review.Judgments
-import com.evanaronson.languagecheck.review.Language
 import com.evanaronson.languagecheck.review.Punctuation
 
-/** The choices made on the settings screen. API keys live separately, in [ApiKeys]. */
+/**
+ * The choices made on the settings screen. API keys live in [ApiKeys]; which
+ * languages appear in the selection menu lives with the menu entries themselves.
+ */
 class Settings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -22,11 +24,6 @@ class Settings(context: Context) {
     var provider: Provider
         get() = read(PROVIDER, Provider.Gemini)
         set(value) = write(PROVIDER, value.name)
-
-    /** Null means the model detects the language. */
-    var language: Language?
-        get() = Language.byCode(prefs.getString(LANGUAGE, null))
-        set(value) = write(LANGUAGE, value?.code)
 
     var punctuation: Punctuation
         get() = read(PUNCTUATION, Punctuation.Moderate)
@@ -50,7 +47,6 @@ class Settings(context: Context) {
 
     private companion object {
         const val PROVIDER = "provider"
-        const val LANGUAGE = "language"
         const val PUNCTUATION = "punctuation"
 
         /** Named "checks" in earlier builds; kept so the saved choice carries over. */

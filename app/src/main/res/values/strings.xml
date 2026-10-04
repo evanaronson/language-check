@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">Linguize</string>
-    <string name="check_action">Check</string>
+    <!-- Text-selection menu entries: auto-detect, then one per language. -->
+    <string name="menu_auto">Linguize</string>
+    <string name="menu_catalan">Catalanize</string>
+    <string name="menu_castilian">Castilianize</string>
 </resources>

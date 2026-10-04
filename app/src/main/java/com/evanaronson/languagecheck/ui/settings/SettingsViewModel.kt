@@ -7,10 +7,10 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.evanaronson.languagecheck.App
+import com.evanaronson.languagecheck.MenuEntry
 import com.evanaronson.languagecheck.llm.CheckFailure
 import com.evanaronson.languagecheck.llm.Provider
 import com.evanaronson.languagecheck.review.Judgments
-import com.evanaronson.languagecheck.review.Language
 import com.evanaronson.languagecheck.review.Punctuation
 import com.evanaronson.languagecheck.settings.KeyStatus
 import com.evanaronson.languagecheck.settings.Settings
@@ -20,7 +20,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class SettingsState(
-    val language: Language? = null,
+    /** The entries shown in the text-selection menu; never empty. */
+    val menu: Set<MenuEntry> = setOf(MenuEntry.Auto),
     val punctuation: Punctuation = Punctuation.Moderate,
     val judgments: Judgments = Judgments.Both,
     val provider: Provider = Provider.Gemini,
@@ -60,7 +61,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             state = withContext(Dispatchers.IO) {
                 val settings = app.settings
                 SettingsState(
-                    language = settings.language,
+                    menu = app.menu.enabled().ifEmpty { setOf(MenuEntry.Auto) },
                     punctuation = settings.punctuation,
                     judgments = settings.judgments,
                     provider = settings.provider,
@@ -72,9 +73,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun setLanguage(language: Language?) {
-        state = state.copy(language = language)
-        save { this.language = language }
+    /** Adds or removes a selection-menu entry; the last one can't be removed. */
+    fun toggleMenuEntry(entry: MenuEntry) {
+        val on = entry !in state.menu
+        if (!on && state.menu.size == 1) return
+        state = state.copy(menu = if (on) state.menu + entry else state.menu - entry)
+        viewModelScope.launch(Dispatchers.IO) { app.menu.setEnabled(entry, on) }
     }
 
     fun setPunctuation(punctuation: Punctuation) {
