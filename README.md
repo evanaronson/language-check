@@ -1,6 +1,6 @@
 # Linguize
 
-Linguize is the guy check that your Spanish was Spanish enough. Or that your Catalan was Catalan enough.
+Linguize is the gut check that your Spanish was Spanish enough. Or that your Catalan was Catalan enough.
 
 Even when you're fluent or able to communicate I'm your target language, you often want a quick check before you hit send: does this make sense, is anything wrong, would a native speaker say it this way?
 
