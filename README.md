@@ -1,22 +1,18 @@
 # Linguize
 
-**A gut check for what you just wrote in a language you're learning.**
+A gut check for what you just wrote in a language you're learning.
 
-## The problem
+When you're writing in a language you're still learning, you often want a quick check before you hit send: does this make sense, is anything wrong, would a native speaker say it this way?
 
-When you write in a language you're learning, especially at an intermediate level, you often want a quick check before you hit send: does this make sense, is anything wrong, would a native speaker say it this way?
+The usual move is Google Translate, but it's built for the opposite job: translating *into* the language you're learning. Paste your own text in and translate it back, and you'll find out whether it's roughly understandable. You won't find out what you got wrong. A good translator reads right past your mistakes and awkward phrasing, because that's what makes it a good translator.
 
-There's no good tool for that. The instinctive move is Google Translate, but Translate is built for the opposite job: turning text *into* the language you're learning. Here the text is already in that language, and it's the part you're unsure about. You can paste it in and translate it back into your own language, and that tells you whether it's roughly understandable, which is better than nothing. But it won't tell you what you got wrong. A good translator reads past your mistakes and awkward phrasing, because understanding imperfect input is exactly what makes it good at translating. Checking your writing isn't a translation task. It's a different job, so it needs a different tool.
+Checking your writing isn't a translation task. Linguize does just that one job. Select what you wrote in any app, tap **Linguize** in the selection menu, and a card floats over the app with:
 
-## What Linguize does
+- **Fixes:** the actual mistakes, each highlighted, with the smallest change and a short reason.
+- **More natural:** how a native speaker would say it, only when it's clearly better.
+- **Meaning:** what your text says, translated into your own language, so you can confirm it says what you meant.
 
-Linguize does that one job. Select what you wrote in any app, tap **Linguize** in the selection menu, and a card floats over the app with:
-
-1. **Fixes:** the actual mistakes, each highlighted separately, with the minimum change and a short reason. Or "No fixes".
-2. **More natural:** how a native speaker would say it, only when it's clearly better. Or "Sounds natural".
-3. **Meaning:** what your text says, translated into your own language, so you can confirm it says what you meant (the part Google Translate was good for).
-
-Replace the changes you want, one at a time or all at once, and you're back where you were. There's no chat and nothing to read beyond short reasons: it's a check, not a lesson.
+Replace what you want, and you're back where you were. No chat, no lessons.
 
 ## Install
 
@@ -42,19 +38,17 @@ The **Apps without the menu** section of Linguize's settings has the same steps 
 
 ## How it works
 
-Possible results: **Looks good**; fixes and/or a more natural rewording, each change highlighted separately; **Can't tell what this means**; **Not <language>** when a language is pinned in settings; or an error with Retry.
+The card shows **Looks good**, fixes and/or rewordings, **Can't tell what this means**, **Not <language>** when you picked a language, or an error with Retry.
 
-Fixes and rewordings are both worked out against the original text, so they're independent: tap a highlight to see why and **Replace** just that change, or **Replace all** for a whole section. Accepted changes disappear from the list; **Undo** reverts the last action, and closing the card in any way (Done, back, tapping outside) hands the text with accepted changes back to the app. Rewordings are written on top of the corrected text, so where a rewording and a fix touch, the rewording wins: accepting the rewording retires the fix, while accepting the fix leaves the rewording on offer, and accepting it later replaces the fix along with the rest of the phrase. Fixes a rewording doesn't touch stay on offer, because it assumes them. Undo brings back what the last action accepted and anything it retired. The rules are written out in `review/Revision.kt`.
+Tap a highlight to see why and **Replace** just that change, or use **Replace all** for a section. **Undo** reverts the last action. However you close the card, the accepted changes go back to the app.
 
-The selection menu can show several entries: **Linguize** (detects the language), **Catalanize** and **Castilianize**. Pick which ones appear in settings; tapping one checks the text as that language. Each entry is an `activity-alias` of `CheckActivity` in the manifest, switched on and off by `SelectionMenu`; adding a language means a `Language`, a `MenuEntry`, an alias and a label.
+Rewordings are written on top of the corrected text, so where a rewording and a fix touch, the rewording wins. Accepting the rewording retires the fix. Accepting the fix leaves the rewording on offer. Fixes elsewhere stay, because the rewording assumes them. The full rules are in `review/Revision.kt`.
 
-A quiet "ⓘ Meaning ›" line at the top of the card (or "ⓘ Meaning · N assumptions ›") leads to a page showing how the text was understood (back returns to the suggestions). **Meaning** is a plain translation of what you wrote into your own language, which is the app's UI language (English for now), so you can confirm it says what you meant. Meaning, assumptions and reasons are all written in that language.
+**Meaning and assumptions.** The "ⓘ Meaning ›" line at the top of the card opens what your text was understood to mean, in your own language (the app's UI language, English for now). Where the text is genuinely ambiguous (who did something, when), it also lists what was assumed. Tap "Not right" to pick another reading, and the text is checked again with your answer.
 
-Below it, where the text is genuinely ambiguous (who did something, when, who's speaking), **Assumptions** lists what was assumed. Each is presented as right; "Not right" offers alternatives, and picking one checks again with that answer, keeping accepted changes that didn't move. Answers last until the card closes.
+**Languages.** The selection menu can show **Linguize** (detects the language), **Catalanize** and **Castilianize**; choose which in settings. Each is an `activity-alias` of `CheckActivity`, switched on and off by `SelectionMenu`. Adding a language means a `Language`, a `MenuEntry`, an alias and a label.
 
-The accessibility button (see Install) shows the same card in an overlay, with a "Linguize ▾" picker above it for checking as a specific language; accepted changes are written back into the field. The service (`accessibility/`) reads the focused field only when the button is tapped.
-
-Settings also has a punctuation level (Strict, Moderate or Casual), which judgments to make (fix, naturalize or both), and a model picker that lists the models your key can use, live from the provider. Picking a model runs a short test check and shows how long it took, or the provider's error.
+**Settings** also has a punctuation level (Strict, Moderate or Casual), which judgments to make, and a model picker that lists your key's models live and runs a short test when you pick one.
 
 ## Code layout
 
