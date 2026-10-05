@@ -1,21 +1,44 @@
 # Linguize
 
-A small Android utility for checking text you've written in a language you're learning. You select the text in any app, tap **Check** in the selection menu, and a card floats over the app with two independent judgments:
+**A gut check for what you just wrote in a language you're learning.**
 
-1. **Correctness:** the minimum fix needed, or "No fixes".
-2. **Naturalness:** one clearly better phrasing, or "Sounds natural".
+## The problem
 
-Copy or Replace, and you're back where you were.
+When you write in a language you're learning, especially at an intermediate level, you often want a quick check before you hit send: does this make sense, is anything wrong, would a native speaker say it this way?
+
+There's no good tool for that. The instinctive move is Google Translate, but Translate is built for the opposite job: turning text *into* the language you're learning. Here the text is already in that language, and it's the part you're unsure about. You can paste it in and translate it back into your own language, and that tells you whether it's roughly understandable, which is better than nothing. But it won't tell you what you got wrong. A good translator reads past your mistakes and awkward phrasing, because understanding imperfect input is exactly what makes it good at translating. Checking your writing isn't a translation task. It's a different job, so it needs a different tool.
+
+## What Linguize does
+
+Linguize does that one job. Select what you wrote in any app, tap **Linguize** in the selection menu, and a card floats over the app with:
+
+1. **Fixes:** the actual mistakes, each highlighted separately, with the minimum change and a short reason. Or "No fixes".
+2. **More natural:** how a native speaker would say it, only when it's clearly better. Or "Sounds natural".
+3. **Meaning:** what your text says, translated into your own language, so you can confirm it says what you meant (the part Google Translate was good for).
+
+Replace the changes you want, one at a time or all at once, and you're back where you were. There's no chat and nothing to read beyond short reasons: it's a check, not a lesson.
 
 ## Install
 
-Every push to `main` builds a signed APK and publishes it as a GitHub release. On the phone:
+**[Download the latest APK](https://github.com/evanaronson/language-check/releases/latest/download/linguize.apk)** (open it while signed in to GitHub, since the repo is private). Every push to `main` builds a new one; older builds are under [Releases](https://github.com/evanaronson/language-check/releases).
 
-1. Open the latest release in this repo and download `language-check-N.apk`.
-2. Open it and allow your browser to install unknown apps when Android asks.
-3. Open **Linguize**, pick Google Gemini or OpenAI, paste that provider's API key ([Gemini](https://aistudio.google.com/apikey), [OpenAI](https://platform.openai.com/api-keys)), tap Save, and try a sentence. Keys are stored encrypted on the phone; none are in the code.
+1. Open the link on your phone and open the downloaded file. When Android asks, allow your browser to install unknown apps.
+2. Open **Linguize**, pick Google Gemini or OpenAI, paste that provider's API key ([Gemini](https://aistudio.google.com/apikey), [OpenAI](https://platform.openai.com/api-keys)) and tap Save. Keys are stored encrypted on the phone and are never in the code.
+3. Try a sentence in **Try it** on the same screen. Then select text you've written in any app and look for **Linguize** in the selection menu (on Samsung it can be behind **⋮** in the menu).
 
-Later builds install over the previous one because they're all signed with the same key.
+That's all most apps need. Later builds install over the previous one because they're all signed with the same key.
+
+### Optional: apps without the menu entry (Telegram, the Claude app…)
+
+Some apps don't show other apps' entries in their selection menu. For those, Linguize can add an accessibility button instead: while typing, tap the button and the same card floats over the app, then accepted changes are written back into the text field. It reads the focused text field only when you tap the button.
+
+Android makes this a few taps because the app wasn't installed from the Play Store:
+
+1. **Settings → Accessibility → Installed apps → Linguize** and try to turn it on. Android blocks it with a "Restricted setting" message the first time; that's expected.
+2. **Settings → Apps → Linguize → ⋮ (top right) → Allow restricted settings**, and confirm.
+3. Back in **Settings → Accessibility → Installed apps → Linguize**: turn it on, along with its shortcut. A floating Linguize button appears (on Samsung you can choose between the floating button and the navigation-bar button).
+
+The **Apps without the menu** section of Linguize's settings has the same steps and a button straight to Accessibility settings.
 
 ## How it works
 
@@ -29,7 +52,7 @@ A quiet "ⓘ Meaning ›" line at the top of the card (or "ⓘ Meaning · N assu
 
 Below it, where the text is genuinely ambiguous (who did something, when, who's speaking), **Assumptions** lists what was assumed. Each is presented as right; "Not right" offers alternatives, and picking one checks again with that answer, keeping accepted changes that didn't move. Answers last until the card closes.
 
-Apps that don't show the selection-menu entries (Telegram, for example) can use the Linguize **accessibility button** instead: tap it while typing and the same card floats over the app, with language chips for the enabled entries; accepted changes are written back into the text field. The service (`accessibility/`) reads the focused field only when the button is tapped. Setup, once: App info → ⋮ → Allow restricted settings, then Accessibility → Linguize.
+The accessibility button (see Install) shows the same card in an overlay, with a "Linguize ▾" picker above it for checking as a specific language; accepted changes are written back into the field. The service (`accessibility/`) reads the focused field only when the button is tapped.
 
 Settings also has a punctuation level (Strict, Moderate or Casual), which judgments to make (fix, naturalize or both), and a model picker that lists the models your key can use, live from the provider. Picking a model runs a short test check and shows how long it took, or the provider's error.
 
