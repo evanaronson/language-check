@@ -105,9 +105,9 @@ private fun EditSection(kind: EditKind, revision: Revision, onCopy: (String) -> 
         else -> {
             val accent = if (fix) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
             val label = when {
-                !fix -> "More natural"
-                remaining.size == 1 -> "1 fix"
-                else -> "${remaining.size} fixes"
+                fix -> if (remaining.size == 1) "1 fix" else "${remaining.size} fixes"
+                remaining.size == 1 -> "1 way to sound more natural"
+                else -> "${remaining.size} ways to sound more natural"
             }
             val preview = revision.preview(kind)
             val highlights = remaining.mapNotNull { edit ->

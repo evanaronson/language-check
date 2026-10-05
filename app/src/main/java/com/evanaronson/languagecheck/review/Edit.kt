@@ -18,8 +18,17 @@ data class Edit(
     val from: String,
     val replacement: String,
     val why: String?,
+    /**
+     * For a rewording: the fixes its replacement already includes, since rewordings
+     * are written on top of the corrected text. Covers fixes that only sit at its
+     * edge, like a comma inserted right where it starts.
+     */
+    val includes: Set<Int> = emptySet(),
 ) {
     val isInsertion get() = start == end
+
+    /** Whether two edits touch: they [overlap][overlaps], or one includes the other. */
+    fun touches(other: Edit) = overlaps(other) || other.id in includes || id in other.includes
 
     /**
      * Whether two edits touch: their spans share a character, an insertion lands

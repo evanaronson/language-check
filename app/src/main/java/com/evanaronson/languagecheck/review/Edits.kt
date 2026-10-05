@@ -43,13 +43,15 @@ internal object Edits {
         val from: String,
         val replacement: String,
         val why: String? = null,
+        /** Ids of the fixes this span's replacement includes. */
+        val includes: Set<Int> = emptySet(),
     )
 
     private fun toEdits(spans: List<Span>, reported: List<VerdictChange>, kind: EditKind, firstId: Int): List<Edit> {
         val unused = reported.toMutableList()
         return spans.mapIndexed { index, span ->
             val why = span.why ?: bestMatch(span, unused)?.also { unused.remove(it) }?.let(::reason)
-            Edit(firstId + index, kind, span.start, span.end, span.from, span.replacement, why)
+            Edit(firstId + index, kind, span.start, span.end, span.from, span.replacement, why, span.includes)
         }
     }
 
@@ -124,7 +126,13 @@ internal object Edits {
         }
         val from = originalPosition(start, placed)
         val to = originalPosition(end, placed)
-        return Span(from, to, original.substring(from, to), prefix + span.replacement + suffix, span.why)
+        // Fixes whose corrected text lies inside the span are part of the rewording,
+        // including insertions at its edges, which share no original characters with it.
+        val includes = placed
+            .filter { it.baseStart < it.baseEnd && start <= it.baseStart && it.baseEnd <= end }
+            .map { it.fix.id }
+            .toSet()
+        return Span(from, to, original.substring(from, to), prefix + span.replacement + suffix, span.why, includes)
     }
 
     /** Maps a corrected-text position that isn't inside any fix to the original. */

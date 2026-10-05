@@ -4,14 +4,19 @@ package com.evanaronson.languagecheck.review
  * The writer's text plus every suggested edit, and which ones they've accepted.
  * Immutable: each action returns a new Revision.
  *
- * Rules, where two edits "touch" as defined by [Edit.overlaps]:
+ * Rules, where a rewording and a fix "touch" as defined by [Edit.touches]:
  * 1. Edits of the same kind never touch each other.
- * 2. Accepting an edit retires every edit of the other kind that touches it.
- * 3. A retired edit is no longer offered: not shown, not counted, not applied by Replace all.
- * 4. Replace all accepts a kind's remaining edits as one action.
- * 5. Undo reverts the last action, bringing back what it accepted and what that retired.
- * So accepted edits never touch, and the working text is simply the original
- * with the accepted edits applied.
+ * 2. Rewordings are written on top of the corrected text, so a rewording already
+ *    includes every fix it touches. The rewording wins.
+ * 3. Accepting a rewording retires the fixes it touches. A retired fix is no longer
+ *    offered: not shown, not counted, not applied by Replace all.
+ * 4. Accepting a fix leaves the rewordings that touch it on offer. Accepting one of
+ *    them later replaces the fix along with the rest of the phrase.
+ * 5. Fixes a rewording doesn't touch stay on offer, because the rewording assumes them.
+ * 6. Replace all accepts a kind's remaining edits as one action.
+ * 7. Undo reverts the last action, bringing back what it accepted and what that retired.
+ * The working text is the original with the accepted edits applied, leaving out
+ * accepted fixes that an accepted rewording replaced.
  */
 data class Revision(
     val original: String,
@@ -57,12 +62,17 @@ data class Revision(
     }
 
     /** The text with accepted edits applied: what goes back to the app. */
-    val workingText: String get() = render(original, edits.filter { it.id in accepted }).text
+    val workingText: String get() = render(original, applied(acceptedEdits)).text
 
     /** The working text with all of [kind]'s remaining edits applied too, and where they sit. */
-    fun preview(kind: EditKind): Rendered = render(original, edits.filter { it.id in accepted } + remaining(kind))
+    fun preview(kind: EditKind): Rendered = render(original, applied(acceptedEdits + remaining(kind)))
 
-    /** Touched by an accepted edit of the other kind. */
+    /** A fix touched by an accepted rewording. */
     private fun retired(edit: Edit) =
-        edits.any { it.id in accepted && it.kind != edit.kind && it.overlaps(edit) }
+        edit.kind == EditKind.Fix && edits.any { it.id in accepted && it.kind == EditKind.Natural && it.touches(edit) }
+
+    /** [edits] without the fixes that a rewording among them replaces. */
+    private fun applied(edits: List<Edit>) = edits.filterNot { fix ->
+        fix.kind == EditKind.Fix && edits.any { it.kind == EditKind.Natural && it.touches(fix) }
+    }
 }

@@ -89,7 +89,7 @@ class ReviewTest {
     }
 
     @Test
-    fun acceptingEitherKindRetiresTheOtherKindWhereTheyTouch() {
+    fun theRewordingWinsWhereItTouchesAFix() {
         val original = "Bon dia! Com estas amb la pluja?"
         val revision = reviewed(
             original,
@@ -111,15 +111,46 @@ class ReviewTest {
         assertTrue(reworded.remaining(EditKind.Fix).isEmpty())
         assertEquals(reworded, reworded.accept(fix.id))
 
-        // Fix first: the rewording over it is retired, and can't be accepted.
+        // Fix first: the rewording stays on offer, and accepting it replaces the fix.
         val fixed = revision.accept(fix.id)
         assertEquals("Bon dia! Com estàs amb la pluja?", fixed.workingText)
-        assertTrue(fixed.remaining(EditKind.Natural).isEmpty())
-        assertEquals(fixed, fixed.accept(natural.id))
+        assertEquals(listOf(natural), fixed.remaining(EditKind.Natural))
+        assertEquals("Bon dia! Com portes la pluja?", fixed.preview(EditKind.Natural).text)
+        val both = fixed.accept(natural.id)
+        assertEquals("Bon dia! Com portes la pluja?", both.workingText)
+        assertTrue(both.remaining(EditKind.Fix).isEmpty())
 
         // Undo brings back what was accepted and what it retired.
-        assertEquals(revision.remaining(EditKind.Natural), fixed.undo().remaining(EditKind.Natural))
+        assertEquals("Bon dia! Com estàs amb la pluja?", both.undo().workingText)
+        assertEquals(revision.remaining(EditKind.Fix), reworded.undo().remaining(EditKind.Fix))
         assertEquals(original, fixed.undo().workingText)
+    }
+
+    @Test
+    fun aRewordingIncludesPunctuationInsertedAtItsEdge() {
+        val revision = reviewed(
+            "estoy en casa y luego salgo",
+            Verdict(
+                status = Verdict.Status.Ok,
+                hasErrors = true,
+                corrected = "Estoy en casa, y luego salgo.",
+                moreNatural = true,
+                natural = "Estoy en casa. Luego salgo.",
+            ),
+        ).revision
+        val natural = revision.remaining(EditKind.Natural).single()
+
+        // The comma is inserted where the rewording starts: it shares no original
+        // characters with it, but the rewording already replaces it.
+        val reworded = revision.accept(natural.id)
+        assertEquals(listOf("Estoy", "."), reworded.replacements(EditKind.Fix))
+        assertEquals("Estoy en casa. Luego salgo.", reworded.acceptAll(EditKind.Fix).workingText)
+
+        // All fixes first, then the rewording: the comma doesn't survive.
+        assertEquals(
+            "Estoy en casa. Luego salgo.",
+            revision.acceptAll(EditKind.Fix).accept(natural.id).workingText,
+        )
     }
 
     @Test

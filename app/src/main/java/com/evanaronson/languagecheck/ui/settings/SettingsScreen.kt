@@ -273,12 +273,11 @@ private fun TryItSection(check: CheckViewModel) {
     SectionTitle("Try it")
     OutlinedTextField(value = sample, onValueChange = { sample = it }, modifier = Modifier.fillMaxWidth(), minLines = 2)
     var entry by rememberSaveable { mutableStateOf(MenuEntry.Auto) }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-        LanguagePicker(entry, onSelect = { entry = it })
-        Button(onClick = { sample.trim().takeIf { it.isNotEmpty() }?.let { check.check(it, entry.language) } }) {
-            Text("Check")
-        }
-    }
+    // Picking a language from the menu runs the check, as in the accessibility overlay.
+    LanguagePicker(entry, onSelect = {
+        entry = it
+        sample.trim().takeIf { text -> text.isNotEmpty() }?.let { text -> check.check(text, it.language) }
+    })
 
     check.state?.let { state ->
         ResultCard(
