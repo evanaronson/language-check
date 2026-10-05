@@ -2,7 +2,7 @@
 
 Linguize is the gut check that your Spanish was Spanish enough. Or that your Catalan was Catalan enough.
 
-Even when you're fluent or able to communicate I'm your target language, you often want a quick check before you hit send: does this make sense, is anything wrong, would a native speaker say it this way?
+Even when you're fluent or able to communicate in your target language, you often want to make sure before you hit send: does this make sense, is anything wrong, would a native speaker say it this way?
 
 You could do Google Translate, but it's built for the opposite job: translating *into* the language you're learning. Paste your own text in and translate it back, and you'll find out whether it's roughly understandable. You won't find out what you got wrong. A good translator reads right past your mistakes and awkward phrasing, because that's what makes it a good translator.
 
