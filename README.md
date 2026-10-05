@@ -1,10 +1,10 @@
 # Linguize
 
-A gut check for what you just wrote in a language you're learning.
+Linguize is the guy check that your Spanish was Spanish enough. Or that your Catalan was Catalan enough.
 
-When you're writing in a language you're still learning, you often want a quick check before you hit send: does this make sense, is anything wrong, would a native speaker say it this way?
+Even when you're fluent or able to communicate I'm your target language, you often want a quick check before you hit send: does this make sense, is anything wrong, would a native speaker say it this way?
 
-The usual move is Google Translate, but it's built for the opposite job: translating *into* the language you're learning. Paste your own text in and translate it back, and you'll find out whether it's roughly understandable. You won't find out what you got wrong. A good translator reads right past your mistakes and awkward phrasing, because that's what makes it a good translator.
+You could do Google Translate, but it's built for the opposite job: translating *into* the language you're learning. Paste your own text in and translate it back, and you'll find out whether it's roughly understandable. You won't find out what you got wrong. A good translator reads right past your mistakes and awkward phrasing, because that's what makes it a good translator.
 
 Checking your writing isn't a translation task. Linguize does just that one job. Select what you wrote in any app, tap **Linguize** in the selection menu, and a card floats over the app with:
 
@@ -12,7 +12,7 @@ Checking your writing isn't a translation task. Linguize does just that one job.
 - **More natural:** how a native speaker would say it, only when it's clearly better.
 - **Meaning:** what your text says, translated into your own language, so you can confirm it says what you meant.
 
-Replace what you want, and you're back where you were. No chat, no lessons.
+Replace what you want, in-libe, and you're back where you were.
 
 ## Install
 
@@ -24,7 +24,7 @@ Replace what you want, and you're back where you were. No chat, no lessons.
 
 That's all most apps need. Later builds install over the previous one because they're all signed with the same key.
 
-### Optional: apps without the menu entry (Telegram, the Claude app…)
+### Optional: apps without the menu entry (i.e. Telegram, the Claude app…)
 
 Some apps don't show other apps' entries in their selection menu. For those, Linguize can add an accessibility button instead: while typing, tap the button and the same card floats over the app, then accepted changes are written back into the text field. It reads the focused text field only when you tap the button.
 
@@ -35,20 +35,6 @@ Android makes this a few taps because the app wasn't installed from the Play Sto
 3. Back in **Settings → Accessibility → Installed apps → Linguize**: turn it on, along with its shortcut. A floating Linguize button appears (on Samsung you can choose between the floating button and the navigation-bar button).
 
 The **Apps without the menu** section of Linguize's settings has the same steps and a button straight to Accessibility settings.
-
-## How it works
-
-The card shows **Looks good**, fixes and/or rewordings, **Can't tell what this means**, **Not <language>** when you picked a language, or an error with Retry.
-
-Tap a highlight to see why and **Replace** just that change, or use **Replace all** for a section. **Undo** reverts the last action. However you close the card, the accepted changes go back to the app.
-
-Rewordings are written on top of the corrected text, so where a rewording and a fix touch, the rewording wins. Accepting the rewording retires the fix. Accepting the fix leaves the rewording on offer. Fixes elsewhere stay, because the rewording assumes them. The full rules are in `review/Revision.kt`.
-
-**Meaning and assumptions.** The "ⓘ Meaning ›" line at the top of the card opens what your text was understood to mean, in your own language (the app's UI language, English for now). Where the text is genuinely ambiguous (who did something, when), it also lists what was assumed. Tap "Not right" to pick another reading, and the text is checked again with your answer.
-
-**Languages.** The selection menu can show **Linguize** (detects the language), **Catalanize** and **Castilianize**; choose which in settings. Each is an `activity-alias` of `CheckActivity`, switched on and off by `SelectionMenu`. Adding a language means a `Language`, a `MenuEntry`, an alias and a label.
-
-**Settings** also has a punctuation level (Strict, Moderate or Casual), which judgments to make, and a model picker that lists your key's models live and runs a short test when you pick one.
 
 ## Code layout
 
