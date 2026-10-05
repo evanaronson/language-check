@@ -20,7 +20,7 @@ Replace the changes you want, one at a time or all at once, and you're back wher
 
 ## Install
 
-**[Download the latest APK](https://github.com/evanaronson/language-check/releases/latest/download/linguize.apk)** (open it while signed in to GitHub, since the repo is private). Every push to `main` builds a new one; older builds are under [Releases](https://github.com/evanaronson/language-check/releases).
+**[Download the latest APK](https://github.com/evanaronson/language-check/releases/latest/download/linguize.apk)**. Every push to `main` builds a new one; older builds are under [Releases](https://github.com/evanaronson/language-check/releases).
 
 1. Open the link on your phone and open the downloaded file. When Android asks, allow your browser to install unknown apps.
 2. Open **Linguize**, pick Google Gemini or OpenAI, paste that provider's API key ([Gemini](https://aistudio.google.com/apikey), [OpenAI](https://platform.openai.com/api-keys)) and tap Save. Keys are stored encrypted on the phone and are never in the code.
@@ -86,4 +86,4 @@ Add cases to `eval/cases.jsonl` when the app gets something wrong.
 
 You need JDK 17+ and the Android SDK. Run `./gradlew assembleRelease`; the APK is written to `app/build/outputs/apk/release/`.
 
-The signing key in `app/signing/` is a throwaway key for sideloading, committed so that CI builds keep installing over each other. Keep the repo private.
+The signing key in `app/signing/` is a throwaway key for sideloading, committed so that CI builds keep installing over each other. Because it's public, anyone could sign an APK that installs over Linguize as an update, so only install APKs from this repo's releases.
