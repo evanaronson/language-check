@@ -9,6 +9,9 @@
         "wrong_language"
       ]
     },
+    "meaning": {
+      "type": "string"
+    },
     "assumptions": {
       "type": "array",
       "items": {
@@ -100,6 +103,7 @@
   },
   "required": [
     "status",
+    "meaning",
     "assumptions",
     "has_errors",
     "corrected",
@@ -111,6 +115,7 @@
   "additionalProperties": false,
   "propertyOrdering": [
     "status",
+    "meaning",
     "assumptions",
     "has_errors",
     "corrected",

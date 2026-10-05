@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">Linguize</string>
+    <!-- The writer's own language, as the model should write it: the UI language. -->
+    <string name="native_language">English</string>
     <!-- Text-selection menu entries: auto-detect, then one per language. -->
     <string name="menu_auto">Linguize</string>
     <string name="menu_catalan">Catalanize</string>

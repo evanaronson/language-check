@@ -31,27 +31,33 @@ import com.evanaronson.languagecheck.review.EditKind
 import com.evanaronson.languagecheck.review.Revision
 import com.evanaronson.languagecheck.review.Settled
 
-/** Any assumptions, one section per judgment, then Undo and Done once something has been accepted. */
+/** The way into the meaning and assumptions, one section per judgment, then Undo and Done once something has been accepted. */
 @Composable
 internal fun ReviewContent(result: CheckResult.Reviewed, settled: List<Settled>, actions: CardActions) {
-    // The assumptions are a page of their own: in from the right, back to the left.
-    var showingAssumptions by remember(result.assumptions, settled) { mutableStateOf(false) }
+    // How the text was understood is a page of its own: in from the right, back to the left.
+    var showingUnderstanding by remember(result, settled) { mutableStateOf(false) }
     AnimatedContent(
-        targetState = showingAssumptions,
+        targetState = showingUnderstanding,
         transitionSpec = {
             val direction = if (targetState) 1 else -1
             (slideInHorizontally { direction * it / 3 } + fadeIn()) togetherWith
                 (slideOutHorizontally { -direction * it / 3 } + fadeOut())
         },
-        label = "assumptions",
-    ) { assumptionsPage ->
+        label = "understanding",
+    ) { understandingPage ->
         Column {
-            if (assumptionsPage) {
-                AssumptionsPage(result.assumptions, settled, actions.onSettle, onBack = { showingAssumptions = false })
+            if (understandingPage) {
+                UnderstandingPage(
+                    result.meaning,
+                    result.assumptions,
+                    settled,
+                    actions.onSettle,
+                    onBack = { showingUnderstanding = false },
+                )
             } else {
                 val count = settled.size + result.assumptions.count { a -> settled.none { it.about == a.about } }
-                AssumptionsEntry(count, onOpen = { showingAssumptions = true })
-                if (count > 0) Spacer(Modifier.height(8.dp))
+                UnderstandingEntry(result.meaning, count, onOpen = { showingUnderstanding = true })
+                if (count > 0 || result.meaning.isNotBlank()) Spacer(Modifier.height(8.dp))
                 Suggestions(result, actions)
             }
         }

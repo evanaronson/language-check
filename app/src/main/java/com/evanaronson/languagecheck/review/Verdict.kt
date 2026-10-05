@@ -7,6 +7,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Verdict(
     val status: Status,
+    /** What the writer means, in their native language. */
+    val meaning: String = "",
     /** Readings of ambiguous parts that the fixes and rewordings rely on; usually none. */
     val assumptions: List<Assumption> = emptyList(),
     @SerialName("has_errors") val hasErrors: Boolean = false,

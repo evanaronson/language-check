@@ -21,7 +21,7 @@ class PromptTest {
             settled = listOf(Settled("Who brought the beers", "You")),
         )
         assertEquals(
-            "Language: Spanish (Peninsular)\nPunctuation: moderate\nChecks: fix\n" +
+            "Language: Spanish (Peninsular)\nPunctuation: moderate\nChecks: fix\nNative: English\n" +
                 "Settled: Who brought the beers → You\nText: que me ha traído",
             prompt.userMessage(request),
         )
@@ -36,5 +36,14 @@ class PromptTest {
         )
         assertEquals(Verdict.Status.Ok, verdict.status)
         assertEquals(listOf("You"), verdict.assumptions.single().alternatives)
+    }
+
+    @Test
+    fun meaningIsReadFromTheAnswer() {
+        val verdict = prompt.parseVerdict(
+            """{"status":"ok","meaning":"I'm at home.","assumptions":[],"has_errors":false,"corrected":"",""" +
+                """"fixes":[],"more_natural":false,"natural":"","natural_changes":[]}""",
+        )
+        assertEquals("I'm at home.", verdict.meaning)
     }
 }

@@ -1,5 +1,6 @@
 package com.evanaronson.languagecheck.ui.card
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SuggestionChip
@@ -29,10 +31,17 @@ import androidx.compose.ui.unit.dp
 import com.evanaronson.languagecheck.review.Assumption
 import com.evanaronson.languagecheck.review.Settled
 
-/** The quiet line at the top of the card that leads to the assumptions; nothing when there are none. */
+/**
+ * The quiet line at the top of the card that leads to how the text was
+ * understood: its meaning and any assumptions. Nothing when there's neither.
+ */
 @Composable
-internal fun AssumptionsEntry(count: Int, onOpen: () -> Unit) {
-    if (count == 0) return
+internal fun UnderstandingEntry(meaning: String, assumptions: Int, onOpen: () -> Unit) {
+    val parts = buildList {
+        if (meaning.isNotBlank()) add("Meaning")
+        if (assumptions == 1) add("1 assumption") else if (assumptions > 1) add("$assumptions assumptions")
+    }
+    if (parts.isEmpty()) return
     Row(
         Modifier
             .fillMaxWidth()
@@ -42,7 +51,7 @@ internal fun AssumptionsEntry(count: Int, onOpen: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "ⓘ  " + if (count == 1) "1 assumption" else "$count assumptions",
+            "ⓘ  " + parts.joinToString(" · "),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
@@ -52,13 +61,15 @@ internal fun AssumptionsEntry(count: Int, onOpen: () -> Unit) {
 }
 
 /**
- * What the check assumed where the text was ambiguous, shown in place of the
- * suggestions. Each assumption is presented as right; alternatives appear only
- * after "Not right", and picking one checks again with that answer.
+ * How the text was understood, shown in place of the suggestions: what it means,
+ * in the writer's own language, then what was assumed where it was ambiguous.
+ * Each assumption is presented as right; alternatives appear only after
+ * "Not right", and picking one checks again with that answer.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun AssumptionsPage(
+internal fun UnderstandingPage(
+    meaning: String,
     assumptions: List<Assumption>,
     settled: List<Settled>,
     onSettle: (String, String) -> Unit,
@@ -68,6 +79,28 @@ internal fun AssumptionsPage(
     var changing by remember { mutableStateOf<String?>(null) }
 
     TextButton(onClick = onBack, contentPadding = PaddingValues(horizontal = 4.dp)) { Text("‹  Back") }
+    if (meaning.isNotBlank()) {
+        Text("Meaning", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "What your text says, as it was understood.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        SelectionContainer {
+            Text(
+                meaning,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .padding(12.dp),
+            )
+        }
+    }
+    if (assumptions.isEmpty() && settled.isEmpty()) return
+    if (meaning.isNotBlank()) Spacer(Modifier.height(20.dp))
     Text("Assumptions", style = MaterialTheme.typography.titleMedium)
     Text(
         "Where your text could be read more than one way, this is how it was read.",

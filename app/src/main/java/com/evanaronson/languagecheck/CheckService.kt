@@ -36,7 +36,7 @@ class CheckService(
         return withContext(Dispatchers.IO) {
             val provider = settings.provider
             val judgments = settings.judgments
-            val request = CheckRequest(text, language, settings.punctuation, judgments, settled)
+            val request = CheckRequest(text, language, settings.punctuation, judgments, settled, settings.nativeLanguage)
             val verdict = clients.getValue(provider).check(key(provider), modelFor(provider), request)
             interpret(text, verdict, judgments, expectedLanguage = language?.name)
         }

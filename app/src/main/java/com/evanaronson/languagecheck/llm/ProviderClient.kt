@@ -15,6 +15,8 @@ data class CheckRequest(
     val judgments: Judgments,
     /** The writer's answers to earlier assumptions. */
     val settled: List<Settled> = emptyList(),
+    /** The writer's own language, for everything they read: the meaning, assumptions and reasons. */
+    val native: String = "English",
 )
 
 /** One provider's API. Every client sends the same [Prompt] and returns the same [Verdict]. */

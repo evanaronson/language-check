@@ -1,6 +1,7 @@
 package com.evanaronson.languagecheck.settings
 
 import android.content.Context
+import com.evanaronson.languagecheck.R
 import com.evanaronson.languagecheck.llm.Provider
 import com.evanaronson.languagecheck.review.Judgments
 import com.evanaronson.languagecheck.review.Punctuation
@@ -9,7 +10,7 @@ import com.evanaronson.languagecheck.review.Punctuation
  * The choices made on the settings screen. API keys live in [ApiKeys]; which
  * languages appear in the selection menu lives with the menu entries themselves.
  */
-class Settings(context: Context) {
+class Settings(private val context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     init {
@@ -32,6 +33,10 @@ class Settings(context: Context) {
     var judgments: Judgments
         get() = read(JUDGMENTS, Judgments.Both)
         set(value) = write(JUDGMENTS, value.name)
+
+    /** The writer's own language: the app's UI language, which the meaning and reasons are written in. */
+    val nativeLanguage: String
+        get() = context.getString(R.string.native_language)
 
     /** The chosen model, or null for the provider's recommended one. */
     fun model(provider: Provider): String? = prefs.getString(modelKey(provider), null)

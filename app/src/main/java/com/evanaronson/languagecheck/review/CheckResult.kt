@@ -14,6 +14,8 @@ sealed interface CheckResult {
         val kinds: List<EditKind>,
         /** What the model assumed where the text was ambiguous. */
         val assumptions: List<Assumption> = emptyList(),
+        /** What the model understood the writer to mean, in the writer's native language. */
+        val meaning: String = "",
     ) : CheckResult {
         /** Nothing to suggest for any judgment that was made. */
         val looksGood get() = kinds.all { revision.edits(it).isEmpty() }
@@ -54,5 +56,6 @@ fun interpret(
         Revision(original, fixes + naturals),
         kinds = EditKind.entries.filter { it in judgments.kinds },
         assumptions = verdict.assumptions.filter { it.about.isNotBlank() && it.assumed.isNotBlank() },
+        meaning = verdict.meaning.trim(),
     )
 }
