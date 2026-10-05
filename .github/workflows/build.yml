@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# One build at a time, so releases are published in push order and the newest is always "latest".
+concurrency:
+  group: build
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
