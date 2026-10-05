@@ -21,7 +21,8 @@ class PromptTest {
             settled = listOf(Settled("Who brought the beers", "You")),
         )
         assertEquals(
-            "Language: Spanish (Peninsular)\nPunctuation: moderate\nChecks: fix\nNative: English\n" +
+            "Language: Spanish (Peninsular)\nPunctuation: moderate\nChecks: fix\n" +
+                "Native: English (write meaning, assumptions and reasons in English)\n" +
                 "Settled: Who brought the beers → You\nText: que me ha traído",
             prompt.userMessage(request),
         )

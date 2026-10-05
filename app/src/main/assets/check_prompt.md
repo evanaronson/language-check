@@ -14,7 +14,7 @@ When `status` is not `ok`, set both booleans to false, both texts to empty strin
 
 ## Meaning
 
-First, in `meaning`, write in the native language what you understand the writer is trying to say: a faithful, plain translation of their whole text as you read it, following your assumptions and any `Settled:` lines. Translate what they mean, not your corrections or rewordings, and don't explain or comment. This is how the writer checks that you understood them. When `status` is not `ok`, `meaning` is an empty string.
+First, in `meaning`, write in the native language (the one on the `Native:` line, never the language of the text) what you understand the writer is trying to say: a faithful, plain translation of their whole text as you read it, following your assumptions and any `Settled:` lines. Translate what they mean, not your corrections or rewordings, and don't explain or comment. This is how the writer checks that you understood them, so a `meaning` in the language of the text is useless to them, even when the text is long. When `status` is not `ok`, `meaning` is an empty string.
 
 ## Assumptions
 
@@ -86,98 +86,98 @@ Return only the JSON object described by the schema. Never translate the text.
 Language: auto
 Punctuation: moderate
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: Bon dia! Com estas amb la pluja?
 {"status":"ok","meaning":"Good morning! How are you doing with the rain?","assumptions":[],"has_errors":true,"corrected":"Bon dia! Com estàs amb la pluja?","fixes":[{"from":"estas","to":"estàs","why":"Missing accent"}],"more_natural":true,"natural":"Bon dia! Com portes la pluja?","natural_changes":[{"from":"estàs amb","to":"portes","why":"Usual way to say it"}]}
 
 Language: Catalan (standard Central Catalan)
 Punctuation: moderate
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: Ens veiem demà a les set?
 {"status":"ok","meaning":"Shall we meet tomorrow at seven?","assumptions":[],"has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: Voy a tomar una ducha y te llamo
 {"status":"ok","meaning":"I'm going to take a shower and then I'll call you.","assumptions":[],"has_errors":false,"corrected":"","fixes":[],"more_natural":true,"natural":"Me voy a duchar y te llamo","natural_changes":[{"from":"Voy a tomar una ducha","to":"Me voy a duchar","why":"More usual in Spain"}]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: Voy a tomar una ducha y te llamo despues
 {"status":"ok","meaning":"I'm going to take a shower and I'll call you afterwards.","assumptions":[],"has_errors":true,"corrected":"Voy a tomar una ducha y te llamo después","fixes":[{"from":"despues","to":"después","why":"Missing accent"}],"more_natural":true,"natural":"Me voy a duchar y te llamo después","natural_changes":[{"from":"Voy a tomar una ducha","to":"Me voy a duchar","why":"More usual in Spain"}]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: Ayer fui a la playa con mis amigos y comimos paella
 {"status":"ok","meaning":"Yesterday I went to the beach with my friends and we ate paella.","assumptions":[],"has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: Ahir vaig comprar unes tomàquets molt bo
 {"status":"ok","meaning":"Yesterday I bought some very good tomatoes.","assumptions":[],"has_errors":true,"corrected":"Ahir vaig comprar uns tomàquets molt bons","fixes":[{"from":"unes","to":"uns","why":"Tomàquet is masculine"},{"from":"bo","to":"bons","why":"Agrees with plural noun"}],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: hola q tal bb estas bien te encanta esta musica no
 {"status":"ok","meaning":"Hi, how's it going, babe? Are you OK? You love this music, don't you?","assumptions":[],"has_errors":true,"corrected":"hola, q tal, bb? Estás bien? Te encanta esta música, no?","fixes":[{"from":"","to":",","why":"Comma after greeting"},{"from":"","to":",","why":"Comma before a name"},{"from":"","to":"?","why":"End of question"},{"from":"estas","to":"Estás","why":"Capital and accent"},{"from":"","to":"?","why":"End of question"},{"from":"te","to":"Te","why":"New sentence, capital"},{"from":"musica","to":"música","why":"Missing accent"},{"from":"","to":",","why":"Comma before a tag question"},{"from":"","to":"?","why":"End of question"}],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: Hola bebé estoy aquí en casa en el sofá y neo está tranquilo en el suelo y tengo algunas cosas que voy a hacer en el ordenador y después me encuentro con Charles y vamos a tomar algunas algunas cervezas en un picnic y vamos a comer algunos snacks de de una bodega o algo y tomar cervezas artesanales que me ha traído de Montreal
 {"status":"ok","meaning":"Hi babe, I'm here at home on the sofa and Neo is relaxing on the floor. I have a few things to do on the computer, and afterwards I'm meeting Charles. We're going to have some beers at a picnic, eat some snacks from a shop or something, and drink the craft beers Charles brought me from Montreal.","assumptions":[{"about":"Who brought the beers","assumed":"Charles","words":"me ha traído","alternatives":["You","Someone else"]}],"has_errors":true,"corrected":"Hola, bebé. Estoy aquí en casa en el sofá y Neo está tranquilo en el suelo y tengo algunas cosas que voy a hacer en el ordenador y después me encuentro con Charles y vamos a tomar algunas cervezas en un picnic y vamos a comer algunos snacks de una bodega o algo y tomar cervezas artesanales que me ha traído de Montreal","fixes":[{"from":"","to":",","why":"Comma before the person addressed"},{"from":"","to":".","why":"Greeting ends a sentence"},{"from":"estoy","to":"Estoy","why":"New sentence, capital"},{"from":"neo","to":"Neo","why":"Names take a capital"},{"from":"algunas algunas","to":"algunas","why":"Repeated word"},{"from":"de de","to":"de","why":"Repeated word"}],"more_natural":true,"natural":"Hola, bebé. Estoy aquí en casa en el sofá y Neo está tranquilo en el suelo y tengo algunas cosas que hacer en el ordenador y después he quedado con Charles y vamos a tomar unas cervezas en un picnic y a comer unos snacks de una tienda o algo y tomar cervezas artesanales que me ha traído de Montreal","natural_changes":[{"from":"que voy a hacer","to":"que hacer","why":"Usual way to say it"},{"from":"me encuentro","to":"he quedado","why":"\"Quedar con\" for plans"},{"from":"algunas cervezas","to":"unas cervezas","why":"\"Algunas\" is a calque"},{"from":"y vamos a comer","to":"y a comer","why":"Avoids repeating \"vamos\""},{"from":"algunos","to":"unos","why":"\"Algunos\" is a calque"},{"from":"bodega","to":"tienda","why":"Bodega means wine shop in Spain"}]}
 
 Language: auto
 Punctuation: strict
 Checks: fix
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: Hola bebé estoy aquí en casa en el sofá y neo está tranquilo en el suelo y tengo algunas cosas que voy a hacer en el ordenador y después me encuentro con Charles y vamos a tomar algunas algunas cervezas en un picnic y vamos a comer algunos snacks de de una bodega o algo y tomar cervezas artesanales que me ha traído de Montreal
 {"status":"ok","meaning":"Hi babe, I'm here at home on the sofa and Neo is relaxing on the floor. I have a few things to do on the computer, and afterwards I'm meeting Charles. We're going to have some beers at a picnic, eat some snacks from a shop or something, and drink the craft beers Charles brought me from Montreal.","assumptions":[{"about":"Who brought the beers","assumed":"Charles","words":"me ha traído","alternatives":["You","Someone else"]}],"has_errors":true,"corrected":"Hola, bebé. Estoy aquí en casa en el sofá, y Neo está tranquilo en el suelo. Tengo algunas cosas que voy a hacer en el ordenador y después me encuentro con Charles. Vamos a tomar algunas cervezas en un pícnic y vamos a comer algunos snacks de una bodega o algo y tomar cervezas artesanales que me ha traído de Montreal.","fixes":[{"from":"","to":",","why":"Comma before the person addressed"},{"from":"","to":".","why":"Greeting ends a sentence"},{"from":"estoy","to":"Estoy","why":"New sentence, capital"},{"from":"","to":",","why":"Comma: clauses with different subjects"},{"from":"neo","to":"Neo","why":"Names take a capital"},{"from":"","to":".","why":"New topic, new sentence"},{"from":"y tengo","to":"Tengo","why":"Sentence starts here"},{"from":"","to":".","why":"New topic, new sentence"},{"from":"y vamos","to":"Vamos","why":"Sentence starts here"},{"from":"algunas algunas","to":"algunas","why":"Repeated word"},{"from":"picnic","to":"pícnic","why":"Dictionary spelling"},{"from":"de de","to":"de","why":"Repeated word"},{"from":"","to":".","why":"Full stop at the end"}],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: strict
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: que tal el finde
 {"status":"ok","meaning":"How was the weekend?","assumptions":[],"has_errors":true,"corrected":"¿Qué tal el finde?","fixes":[{"from":"","to":"¿","why":"Opening question mark"},{"from":"que","to":"Qué","why":"Capital and accent"},{"from":"","to":"?","why":"Closing question mark"}],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: casual
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: hola q tal bb estas bien
 {"status":"ok","meaning":"Hi, how's it going, babe? Are you OK?","assumptions":[],"has_errors":true,"corrected":"hola q tal bb estás bien","fixes":[{"from":"estas","to":"estás","why":"Missing accent"}],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: moderate
 Checks: fix
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: Voy a tomar una ducha y te llamo
 {"status":"ok","meaning":"I'm going to take a shower and then I'll call you.","assumptions":[],"has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: Charles y yo vamos a tomar las cervezas que me ha traído de Montreal
 {"status":"ok","meaning":"Charles and I are going to drink the beers he brought me from Montreal.","assumptions":[{"about":"Who brought the beers","assumed":"Charles","words":"me ha traído","alternatives":["You","Someone else"]}],"has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: auto
 Punctuation: moderate
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Settled: Who brought the beers → You
 Text: Charles y yo vamos a tomar las cervezas que me ha traído de Montreal
 {"status":"ok","meaning":"Charles and I are going to drink the beers I brought from Montreal.","assumptions":[],"has_errors":true,"corrected":"Charles y yo vamos a tomar las cervezas que he traído de Montreal","fixes":[{"from":"me ha traído","to":"he traído","why":"You brought them"}],"more_natural":false,"natural":"","natural_changes":[]}
@@ -185,13 +185,13 @@ Text: Charles y yo vamos a tomar las cervezas que me ha traído de Montreal
 Language: auto
 Punctuation: moderate
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: el porta de la quan si mesa verd
 {"status":"unclear","meaning":"","assumptions":[],"has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}
 
 Language: Spanish (Peninsular)
 Punctuation: moderate
 Checks: both
-Native: English
+Native: English (write meaning, assumptions and reasons in English)
 Text: See you tomorrow at the station
 {"status":"wrong_language","meaning":"","assumptions":[],"has_errors":false,"corrected":"","fixes":[],"more_natural":false,"natural":"","natural_changes":[]}

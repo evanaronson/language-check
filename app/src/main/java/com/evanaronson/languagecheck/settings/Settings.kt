@@ -34,6 +34,10 @@ class Settings(private val context: Context) {
         get() = read(JUDGMENTS, Judgments.Both)
         set(value) = write(JUDGMENTS, value.name)
 
+    /** Every choice that affects a check, to tell whether settings changed in the meantime. */
+    val snapshot: String
+        get() = listOf(provider, punctuation, judgments, model(provider), nativeLanguage).joinToString()
+
     /** The writer's own language: the app's UI language, which the meaning and reasons are written in. */
     val nativeLanguage: String
         get() = context.getString(R.string.native_language)

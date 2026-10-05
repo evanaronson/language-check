@@ -359,4 +359,17 @@ class ReviewTest {
         // Without a chosen language there's nothing to be wrong about.
         assertEquals(CheckResult.Unclear, interpret("x", Verdict(status = Verdict.Status.WrongLanguage)))
     }
+
+    @Test
+    fun aMeaningThatJustRepeatsTheTextIsDropped() {
+        val original = "Charles y yo vamos a tomar las cervezas que me ha traído de Montreal"
+        fun meaningOf(meaning: String) =
+            (interpret(original, Verdict(status = Verdict.Status.Ok, meaning = meaning)) as CheckResult.Reviewed).meaning
+
+        assertEquals("", meaningOf("Charles y yo vamos a tomar las cervezas que me ha traído de Montreal."))
+        assertEquals(
+            "Charles and I are going to drink the beers he brought me from Montreal.",
+            meaningOf("Charles and I are going to drink the beers he brought me from Montreal."),
+        )
+    }
 }

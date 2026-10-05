@@ -10,7 +10,8 @@
       ]
     },
     "meaning": {
-      "type": "string"
+      "type": "string",
+      "description": "The whole text translated into the writer's native language, the one on the Native: line. Never in the language the text is written in."
     },
     "assumptions": {
       "type": "array",

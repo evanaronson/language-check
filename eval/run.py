@@ -106,7 +106,7 @@ def main():
             message = (f"Language: {case.get('language', 'auto')}\n"
                        f"Punctuation: {case.get('punctuation', 'moderate')}\n"
                        f"Checks: {case.get('checks', 'both')}\n"
-                       "Native: English\n"
+                       "Native: English (write meaning, assumptions and reasons in English)\n"
                        + "".join(f"Settled: {about} → {answer}\n" for about, answer in case.get("settled", []))
                        + f"Text: {case['text']}")
             verdict, elapsed = check(model, key, system, schema, message)

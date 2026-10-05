@@ -29,4 +29,9 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onStop() {
+        super.onStop()
+        (application as App).settingsClosed.value++
+    }
 }

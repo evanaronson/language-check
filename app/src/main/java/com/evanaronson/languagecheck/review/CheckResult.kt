@@ -56,6 +56,18 @@ fun interpret(
         Revision(original, fixes + naturals),
         kinds = EditKind.entries.filter { it in judgments.kinds },
         assumptions = verdict.assumptions.filter { it.about.isNotBlank() && it.assumed.isNotBlank() },
-        meaning = verdict.meaning.trim(),
+        meaning = verdict.meaning.trim().takeUnless { isUntranslated(it, original) }.orEmpty(),
     )
+}
+
+/**
+ * Whether [meaning] is mostly [original]'s own words: the model echoed the text
+ * instead of translating it, so there's no meaning worth showing.
+ */
+internal fun isUntranslated(meaning: String, original: String): Boolean {
+    fun words(text: String) = Regex("""\p{L}{3,}""").findAll(text.lowercase()).map { it.value }.toList()
+    val meaningWords = words(meaning)
+    if (meaningWords.isEmpty()) return false
+    val originalWords = words(original).toSet()
+    return meaningWords.count { it in originalWords } * 2 >= meaningWords.size
 }
