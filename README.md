@@ -62,6 +62,12 @@ OPENAI_API_KEY=... python3 eval/run.py --provider openai
 
 Add cases to `eval/cases.jsonl` when the app gets something wrong.
 
+## Brand
+
+The wordmark is **lingu·ize**: the raised dot (the Catalan *punt volat*, as in col·legi) marks where *-ize* snaps onto a word, as in catalan·ize and castilian·ize. The launcher icon is "·ize", cut straight from the wordmark. It's ink on paper, and cobalt (`#3340F0`, lighter `#7C84FF` in dark mode) is the one colour, used on the wordmark's dot and as the app's accent.
+
+`brand/` holds the SVGs. Every letter is drawn in code from one geometric kit in `brand/source/` (`python3 brand/source/build.py` rebuilds them into `brand/A/`). The app's copies are vector drawables: `wordmark.xml`, `ic_launcher_foreground.xml` and `ic_launcher_monochrome.xml`.
+
 ## Build locally
 
 You need JDK 17+ and the Android SDK. Run `./gradlew assembleRelease`; the APK is written to `app/build/outputs/apk/release/`.
