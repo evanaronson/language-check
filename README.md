@@ -12,7 +12,7 @@ Checking your writing isn't a translation task. Linguize does just that one job.
 - **More natural:** how a native speaker would say it, only when it's clearly better.
 - **Meaning:** what your text says, translated into your own language, so you can confirm it says what you meant.
 
-Replace what you want, in-libe, and you're back where you were.
+Replace what you want, in-line, and you're back where you were.
 
 ## Install
 
@@ -24,7 +24,7 @@ Replace what you want, in-libe, and you're back where you were.
 
 That's all most apps need. Later builds install over the previous one because they're all signed with the same key.
 
-### Optional: apps without the menu entry (i.e. Telegram, the Claude app…)
+### Optional: apps without the menu entry (e.g. Telegram, the Claude app…)
 
 Some apps don't show other apps' entries in their selection menu. For those, Linguize can add an accessibility button instead: while typing, tap the button and the same card floats over the app, then accepted changes are written back into the text field. It reads the focused text field only when you tap the button.
 
@@ -38,18 +38,19 @@ The **Apps without the menu** section of Linguize's settings has the same steps 
 
 ## Code layout
 
-Packages under `app/src/main/java/com/evanaronson/languagecheck/`, each depending only on the ones above it:
+Everything is under `app/src/main/java/com/evanaronson/linguize/`. Dependencies point one way: the core knows nothing else, and the screens sit on top.
 
-| Package | Responsibility |
+| Package | Role |
 |---|---|
-| `review/` | The core, with no Android or network code. `Verdict` is the model's answer as the schema defines it; `Edits` and `Alignment` turn it into `Edit`s anchored to the original text (positions come from aligning the texts, never from the model; every punctuation mark is its own fix; rewordings are found against the corrected text, so fixes never repeat in them, then mapped back onto the original); `Revision` tracks which edits are accepted; `interpret()` produces a `CheckResult`. Also the check options: `Language`, `Punctuation`, `Judgments`. |
-| `llm/` | Talking to models. `Prompt` is the contract: instructions and schema from `assets/`, the user-message format, and reading answers. `GeminiClient` and `OpenAIClient` implement `ProviderClient` (check, list models) over plain REST; adding a provider means one more client. |
-| `settings/` | `Settings` (choices) and `ApiKeys` (keys encrypted with an Android Keystore key). |
-| `accessibility/` | The accessibility button: reads the focused field, shows the card in an overlay window, writes accepted changes back. `FieldText` handles checking a selection and putting the result back in place. |
-| root | `CheckService` runs a check with the chosen provider, model and options; `SelectionMenu` turns the menu entries on and off; `App` creates the long-lived objects; `CheckActivity` opens from a menu entry; `MainActivity` hosts settings. |
-| `ui/` | `card/`: the result card and its `CheckViewModel`, which owns the check and the accepted changes. `settings/`: the settings screen and its `SettingsViewModel`. `components/`: shared controls. |
+| `core/` | Pure Kotlin, no Android or network, unit-tested. The check's options (`Language`, `Punctuation`, `Judgments`), the model's answer as the schema defines it (`Verdict`), and the edit engine: `Alignment` and `Edits` turn the answer into `Edit`s anchored to the original text (positions come from aligning the texts, never from the model; each punctuation mark is its own fix; rewordings are found against the corrected text, then mapped back), `Revision` tracks accepting and undoing with the rules written out at its top, and `interpret()` produces a `CheckResult`. `Selection` splits selected text from the whitespace around it. |
+| `llm/` | Talking to models. `Prompt` is the contract: the instructions and schema in `assets/`, the user-message format, and reading answers. `GeminiClient` and `OpenAIClient` implement `ProviderClient` over plain REST; adding a provider means one more client. `CheckFailure` is every way a check can fail. |
+| `data/` | What the phone remembers: `Settings`, `ApiKeys` (encrypted with an Android Keystore key) and `SelectionMenu` (which menu entries are on, kept as the enabled state of their activity-aliases). |
+| root | `Checker` runs a check with the chosen provider, model and options; `App` creates the long-lived objects. |
+| `ui/` | `card/`: the result card and its `CheckViewModel`, which owns a check and the accepted changes; `CardActions.of()` gives the card the same behaviour everywhere. `settings/`: the settings screen (one file per section), its view model and `SettingsActivity`, the launcher screen. `components/` and `theme/`: shared controls and the brand theme. |
+| `menu/` | `CheckActivity`, opened from a selection-menu entry. |
+| `accessibility/` | The accessibility button: `LinguizeAccessibilityService` reads the focused field and writes accepted changes back; `OverlayWindow` shows the card above other apps. |
 
-The prompt and schema live in `app/src/main/assets/` so the eval script uses exactly what the app sends.
+The prompt and schema live in `app/src/main/assets/` so the eval script uses exactly what the app sends, and a unit test checks every example in the prompt against the schema.
 
 ## Tuning the judgments
 
@@ -66,10 +67,10 @@ Add cases to `eval/cases.jsonl` when the app gets something wrong.
 
 The wordmark is **lingu·ize**: the raised dot (the Catalan *punt volat*, as in col·legi) marks where *-ize* snaps onto a word, as in catalan·ize and castilian·ize. The launcher icon is "·ize", cut straight from the wordmark. It's ink on paper, and cobalt (`#3340F0`, lighter `#7C84FF` in dark mode) is the one colour, used on the wordmark's dot and as the app's accent.
 
-`brand/` holds the SVGs. Every letter is drawn in code from one geometric kit in `brand/source/` (`python3 brand/source/build.py` rebuilds them into `brand/A/`). The app's copies are vector drawables: `wordmark.xml`, `ic_launcher_foreground.xml` and `ic_launcher_monochrome.xml`.
+`brand/` holds the SVGs. Every letter is drawn in code from one geometric kit in `brand/source/`; `python3 brand/source/build.py` rebuilds them. The app's copies are vector drawables: `wordmark.xml`, `ic_launcher_foreground.xml` and `ic_launcher_monochrome.xml`.
 
 ## Build locally
 
-You need JDK 17+ and the Android SDK. Run `./gradlew assembleRelease`; the APK is written to `app/build/outputs/apk/release/`.
+You need JDK 17+ and the Android SDK. `./gradlew testDebugUnitTest` runs the tests; `./gradlew assembleRelease` writes the APK to `app/build/outputs/apk/release/`. A local build has version 1, so it won't install over a release build without uninstalling first.
 
 The signing key in `app/signing/` is a throwaway key for sideloading, committed so that CI builds keep installing over each other. Because it's public, anyone could sign an APK that installs over Linguize as an update, so only install APKs from this repo's releases.

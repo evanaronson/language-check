@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace = "com.evanaronson.languagecheck"
+    namespace = "com.evanaronson.linguize"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.evanaronson.languagecheck"
+        applicationId = "com.evanaronson.linguize"
         // Galaxy S21 runs Android 15; nothing older needs supporting.
         minSdk = 30
         targetSdk = 36

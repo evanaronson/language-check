@@ -50,7 +50,7 @@ def check_gemini(model, key, system, schema, message):
 
 
 def check_openai(model, key, system, schema, message):
-    # Mirrors OpenAIChecker: strict mode rejects Gemini's propertyOrdering.
+    # Mirrors OpenAIClient: strict mode rejects Gemini's propertyOrdering.
     schema = {k: v for k, v in schema.items() if k != "propertyOrdering"}
     body = {
         "model": model,
