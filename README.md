@@ -16,7 +16,7 @@ Replace what you want, in-libe, and you're back where you were.
 
 ## Install
 
-**[Download the latest APK](https://github.com/evanaronson/language-check/releases/latest/download/linguize.apk)**. Every push to `main` builds a new one; older builds are under [Releases](https://github.com/evanaronson/language-check/releases).
+**[Download the latest APK](https://github.com/evanaronson/linguize/releases/latest/download/linguize.apk)**. Every push to `main` builds a new one; older builds are under [Releases](https://github.com/evanaronson/linguize/releases).
 
 1. Open the link on your phone and open the downloaded file. When Android asks, allow your browser to install unknown apps.
 2. Open **Linguize**, pick Google Gemini or OpenAI, paste that provider's API key ([Gemini](https://aistudio.google.com/apikey), [OpenAI](https://platform.openai.com/api-keys)) and tap Save. Keys are stored encrypted on the phone and are never in the code.

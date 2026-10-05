@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "language-check"
+rootProject.name = "linguize"
 include(":app")

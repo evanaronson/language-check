@@ -42,14 +42,14 @@ jobs:
 
       - name: Rename APK
         run: |
-          cp app/build/outputs/apk/release/app-release.apk language-check-${{ github.run_number }}.apk
+          cp app/build/outputs/apk/release/app-release.apk linguize-${{ github.run_number }}.apk
           # The same APK under a fixed name, so releases/latest/download/linguize.apk always gets the newest build.
           cp app/build/outputs/apk/release/app-release.apk linguize.apk
 
       - uses: actions/upload-artifact@v7
         with:
-          name: language-check-${{ github.run_number }}
-          path: language-check-${{ github.run_number }}.apk
+          name: linguize-${{ github.run_number }}
+          path: linguize-${{ github.run_number }}.apk
 
       # A release gives a direct download link that works from the phone's browser.
       - name: Publish release
@@ -58,7 +58,7 @@ jobs:
           # Passed through the environment so quotes in commit messages can't break the command.
           NOTES: ${{ github.event.head_commit.message || 'Manual build' }}
         run: |
-          gh release create "build-${{ github.run_number }}" "language-check-${{ github.run_number }}.apk" linguize.apk \
+          gh release create "build-${{ github.run_number }}" "linguize-${{ github.run_number }}.apk" linguize.apk \
             --title "Build ${{ github.run_number }}" \
             --notes "$NOTES" \
             --latest
