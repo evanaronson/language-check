@@ -27,6 +27,10 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "app/src/main/assets"
 
+# Prompt.MAX_OUTPUT_TOKENS and Prompt.TEXT_OPEN/TEXT_CLOSE in the app: what it sends.
+MAX_OUTPUT_TOKENS = 8192
+TEXT_OPEN, TEXT_CLOSE = "<text>", "</text>"
+
 
 def check_gemini(model, key, system, schema, message):
     body = {
@@ -35,7 +39,7 @@ def check_gemini(model, key, system, schema, message):
         "generationConfig": {
             "responseMimeType": "application/json",
             "responseJsonSchema": schema,
-            "maxOutputTokens": 4096,
+            "maxOutputTokens": MAX_OUTPUT_TOKENS,
             "thinkingConfig": {"thinkingLevel": "MINIMAL"},
         },
     }
@@ -58,7 +62,7 @@ def check_openai(model, key, system, schema, message):
         "instructions": system,
         "input": message,
         "store": False,
-        "max_output_tokens": 4096,
+        "max_output_tokens": MAX_OUTPUT_TOKENS,
         "reasoning": {"effort": "none"},
         "text": {"format": {"type": "json_schema", "name": "check", "strict": True, "schema": schema}},
     }
@@ -109,7 +113,7 @@ def main():
                        f"Checks: {case.get('checks', 'both')}\n"
                        "Native: English (write meaning, assumptions and reasons in English)\n"
                        + "".join(f"Settled: {about} → {answer}\n" for about, answer in case.get("settled", []))
-                       + f"Text: {case['text']}")
+                       + f"Text: {TEXT_OPEN}{case['text']}{TEXT_CLOSE}")
             verdict, elapsed = check(model, key, system, schema, message)
         except (urllib.error.URLError, KeyError, json.JSONDecodeError) as error:
             failures += 1

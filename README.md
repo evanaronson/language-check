@@ -22,6 +22,8 @@ Replace what you want, in-line, and you're back where you were.
 2. Open **Linguize**, pick Google Gemini or OpenAI, paste that provider's API key ([Gemini](https://aistudio.google.com/apikey), [OpenAI](https://platform.openai.com/api-keys)) and tap Save. Keys are stored encrypted on the phone and are never in the code.
 3. Try a sentence in **Try it** on the same screen. Then select text you've written in any app and look for **Linguize** in the selection menu (on Samsung it can be behind **⋮** in the menu).
 
+Home, the screen Linguize opens to, has Try it and, below it, **Recent**: the checks you've made, newest first. Tap one to see it as the card showed it; swipe it away to delete it. Settings is behind the gear. Its **History** section turns remembering off (on by default; what's already kept stays), shows how much is kept, and has **Clear** and **Export** (a JSON Lines file). History stays on the phone.
+
 That's all most apps need. Later builds install over the previous one because they're all signed with the same key.
 
 ### Optional: apps without the menu entry (e.g. Telegram, the Claude app…)
@@ -38,16 +40,21 @@ The **Apps without the menu** section of Linguize's settings has the same steps 
 
 ## Code layout
 
-Everything is under `app/src/main/java/com/evanaronson/linguize/`. Dependencies point one way: the core knows nothing else, and the screens sit on top.
+Everything is under `app/src/main/java/com/evanaronson/linguize/`. Dependencies run one way, checked by reading every `import`: `core` imports nothing of the app, `llm` imports only `core`, `history` only `core` and `llm`, and `data` only those three (and `R`). The root `App` and `Checker` sit on all of those, `ui/` on the root and below, and `menu/` and `accessibility/` on top of `ui/`. There are no cycles. Inside `ui/`: `components` and `Clipboard` are the base, then `card`, then `history` and `settings`, then `home`.
 
 | Package | Role |
 |---|---|
 | `core/` | Pure Kotlin, no Android or network, unit-tested. The check's options (`Language`, `Punctuation`, `Judgments`), the model's answer as the schema defines it (`Verdict`), and the edit engine: `Alignment` and `Edits` turn the answer into `Edit`s anchored to the original text (positions come from aligning the texts, never from the model; each punctuation mark is its own fix; rewordings are found against the corrected text, then mapped back), `Revision` tracks accepting and undoing with the rules written out at its top, and `interpret()` produces a `CheckResult`. `Selection` splits selected text from the whitespace around it. |
-| `llm/` | Talking to models. `Prompt` is the contract: the instructions and schema in `assets/`, the user-message format, and reading answers. `GeminiClient` and `OpenAIClient` implement `ProviderClient` over plain REST; adding a provider means one more client. `CheckFailure` is every way a check can fail. |
-| `data/` | What the phone remembers: `Settings`, `ApiKeys` (encrypted with an Android Keystore key) and `SelectionMenu` (which menu entries are on, kept as the enabled state of their activity-aliases). |
-| root | `Checker` runs a check with the chosen provider, model and options; `App` creates the long-lived objects. |
-| `ui/` | `card/`: the result card and its `CheckViewModel`, which owns a check and the accepted changes; `CardActions.of()` gives the card the same behaviour everywhere. `home/`: `HomeActivity`, the launcher screen: Try it, then Recent, with Settings and a past check's detail as screens of the same activity. `history/`: the Recent list, the detail page and their view models. `settings/`: the settings screen (one file per section) and its view model. `components/` and `theme/`: shared controls and the brand theme. |
-| `history/` | What the phone remembers about checks: the data model (rows ready to sync to a server later), `SessionRecording` (pure Kotlin, turns what happens on a card into rows, tested) and `SqliteHistoryStore` behind the `HistoryStore` interface. Design and decisions in `docs/history-spec.md`. |
+| `llm/` | Talking to models. `Prompt` is the contract: the instructions and schema in `assets/`, the user-message format, the output limit and reading answers. `GeminiClient` and `OpenAIClient` implement `ProviderClient` over plain REST (`Http` is the shared call). Adding a provider takes a `Provider` entry, a client, its `Stored.provider` token and an entry in `App`'s client map. `CheckFailure` is every way a check can fail. |
+| `history/` | What the phone remembers about checks; design and decisions in `docs/history-spec.md`. `HistoryModel` has the records (`SessionRecord`, `SuggestionRecord`, `Attempt`, and the `Origin`, `Decision` and `Outcome` enums), built to be uploaded as-is later. `Stored` is the token codec: every kept enum is written as a fixed lowercase token, and an unknown token reads as null instead of crashing. `SessionRecording` (pure Kotlin, tested) turns what happens on one card into a session and its suggestions with their decisions. `CheckHistory` is what the card talks to: it opens, records and closes sessions off the main thread and races the model against a kept answer for the same text. `HistoryStore` is the storage interface; `SqliteHistoryStore` implements it on the framework's SQLite, with its SQL and row mapping in `HistorySchema` and the JSON (the `attempts` column, the export) in `HistoryJson`. |
+| `data/` | What the phone remembers besides history: `Settings`, `ApiKeys` (encrypted with an Android Keystore key) and `SelectionMenu` (which menu entries are on, kept as the enabled state of their activity-aliases). |
+| root | `Checker` runs a check with the chosen provider, model and options; `App` creates the long-lived objects (settings, keys, the history store, the checker and its clients, an application-wide scope for writes that outlive a screen). |
+| `ui/card/` | The result card and its `CheckViewModel`, which owns a check and the accepted changes and reports to `CheckHistory`; `CardActions.of()` gives the card the same behaviour everywhere. |
+| `ui/components/` | Shared controls, the language picker and date formatting. |
+| `ui/history/` | The Recent list and the page for one past check (rebuilt with the card's own content), with their view models. |
+| `ui/home/` | `HomeActivity`, the launcher screen: Try it, then Recent, with Settings and a past check's page as screens of the same activity. |
+| `ui/settings/` | The settings screen (one file per section, History included) and its view model. |
+| `ui/theme/` | The brand theme. |
 | `menu/` | `CheckActivity`, opened from a selection-menu entry. |
 | `accessibility/` | The accessibility button: `LinguizeAccessibilityService` reads the focused field and writes accepted changes back; `OverlayWindow` shows the card above other apps. |
 
@@ -72,6 +79,6 @@ The wordmark is **lingu·ize**: the raised dot (the Catalan *punt volat*, as in 
 
 ## Build locally
 
-You need JDK 17+ and the Android SDK. `./gradlew testDebugUnitTest` runs the tests; `./gradlew assembleRelease` writes the APK to `app/build/outputs/apk/release/`. A local build has version 1, so it won't install over a release build without uninstalling first.
+You need JDK 21 (the Robolectric tests need it) and the Android SDK. `./gradlew testDebugUnitTest` runs the tests; `./gradlew assembleRelease` writes the APK to `app/build/outputs/apk/release/`. A local release build has version 1 and is signed with the debug key, so it won't install over a release build from CI without uninstalling first.
 
-The signing key in `app/signing/` is a throwaway key for sideloading, committed so that CI builds keep installing over each other. Because it's public, anyone could sign an APK that installs over Linguize as an update, so only install APKs from this repo's releases.
+Release builds are signed in CI with a private key kept in GitHub Actions secrets: `SIGNING_KEYSTORE_BASE64`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS` and `SIGNING_KEY_PASSWORD`. Without them CI refuses to build.

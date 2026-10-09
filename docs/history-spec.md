@@ -1,6 +1,6 @@
 # History
 
-Status: proposal, not built. Branch `feature/history`.
+Status: built (v1), branch `feature/history`. What isn't built yet is marked below (the requirements checklist lists it). Where this document and the code disagree, the code wins.
 
 ## Decisions (9 Oct)
 
@@ -44,70 +44,90 @@ Two things make this harder than "write a row":
 
 ## How it fits the app
 
-The app already has one place that knows everything about a check: `CheckViewModel` owns the text, the language, the settled answers, the revision (every suggested edit and what's accepted), and the moment the card closes. Recording hooks in there and nowhere else. The three hosts (selection menu, accessibility button, settings tester) change by one argument.
+The app already has one place that knows everything about a check: `CheckViewModel` owns the text, the language, the settled answers, the revision (every suggested edit and what's accepted), and the moment the card closes. Recording hooks in there and nowhere else. The three hosts (selection menu, accessibility button, settings tester) pass `check()` an `origin`, and the first two the package the text came from.
 
 ```
-CheckViewModel ──events──▶ HistoryRecorder ──rows──▶ HistoryStore (SQLite)
-                                 │                        │
-                          pure Kotlin, tested       data/ package
+CheckViewModel ──▶ CheckHistory ──▶ SessionRecording
+                       │              (pure Kotlin, tested)
+                       └─writes─▶ HistoryStore ◀── SqliteHistoryStore (history/)
 ```
 
-- `HistoryRecorder` turns what happens in the view model into records. It's pure Kotlin with no Android in it, so the mapping (which suggestion ended up accepted, undone, ignored, retired, copied) is unit-tested like the edit engine.
-- `HistoryStore` is an interface with one implementation on the framework's SQLite. The recorder and the settings screen talk to the interface. If storage changes (SQLDelight for an iOS port, a server), the recorder doesn't.
-- `App` gets an application-wide coroutine scope. The close-of-card write happens as the view model is being cleared, when `viewModelScope` is already cancelled, so it needs a scope that outlives the screen.
+- `SessionRecording` turns what happens on one card into records: one session and its suggestions. It's pure Kotlin with no Android or storage in it, so the mapping (which suggestion ended up accepted, undone, ignored, retired, copied) is unit-tested like the edit engine. One instance per `check()`.
+- `CheckHistory` is what the view model talks to. It opens the session, queues the writes, reads whether history is on before each one, and races the model against a kept answer (see *Reusing a kept answer*). Its failures are logged and never reach the card.
+- `HistoryStore` is an interface with one implementation, `SqliteHistoryStore`, on the framework's SQLite with hand-written SQL (`HistorySchema`). If storage changes (SQLDelight for an iOS port, a server), nothing above it does.
+- `App` has an application-wide coroutine scope. The close-of-card write happens as the view model is being cleared, when `viewModelScope` is already cancelled, so it needs a scope that outlives the screen. Writes are queued on it in order.
 
-### What the recorder sees
+### What the recording sees
 
 | Event | From | Recorded as |
 |---|---|---|
-| `check(text, language, origin)` | any host | a new **session**, written immediately with `closedAt = null` |
-| verdict arrives, or fails | `run()` | an **attempt** appended to the session (raw verdict, settled answers, failure) |
-| `accept`, `acceptAll`, `undo` | card | remembered in memory (`everAccepted`) to tell *undone* from *ignored* later |
-| Copy of a section's preview | card | remembered in memory: that kind's remaining suggestions were taken by copying |
-| close: `dismiss()`, a new `check()`, or `onCleared()` | any host | the session is **closed**: final text, outcome, and one **suggestion** row per edit with its decision |
+| `check(text, language, origin, hostApp)` | any host | a new **session**, saved immediately with `closedAt = null`, unless history is off or the text is over the 3,000-character limit (the check refuses it anyway) |
+| verdict arrives, or fails | `run()` | an **attempt** appended to the session (raw verdict, settled answers, failure, `reusedFrom` when a kept answer was shown) |
+| `accept`, `acceptAll`, `undo` | card | the new revision, remembered in memory (`everAccepted`) to tell *undone* from *ignored* later |
+| Copy of a section's preview | card | remembered in memory: what that copy contained |
+| close: `dismiss()`, a new `check()`, or `onCleared()` | any host | the session is **closed**: final text, outcome, and the suggestion rows with their decisions |
 
-Closing is the one subtle part. Today the hosts read `workingText` and close in three different ways; the recorder doesn't care, because all three paths end in `dismiss()` or `onCleared()` on the view model. Nothing is written on every tap; one write at open, one per attempt, one transaction at close.
+Closing is the one subtle part. The hosts close in different ways, but all of them end in `dismiss()`, a new `check()` or `onCleared()` on the view model. Nothing is written on every tap: one write at open, one per attempt, one transaction at close. A close replaces the session's suggestion rows (it deletes any there and inserts the final set), so closing twice never doubles them.
 
 ### Decisions, defined
 
-Each suggestion ends the session with exactly one decision:
+Each suggestion ends the session with exactly one decision. The suggestions decided at the close are those of the *decided revision*: the last one an attempt offered. Suggestions of earlier revisions are `superseded`.
 
 | Decision | Meaning |
 |---|---|
-| `accepted` | applied in the final text (and, if a fix, not replaced by an accepted rewording) |
+| `accepted` | applied in the final text, which only exists when `finalText` went back to the app (and, if a fix, not replaced by an accepted rewording) |
 | `undone` | accepted at some point, not applied at the end |
 | `retired` | a fix overtaken by an accepted rewording (the rewording includes it) |
-| `copied` | the writer copied that section's preview; the suggestion left the app in the copy |
+| `copied` | the writer copied that section's preview and the suggestion was in it: accepted changes that show in the text, and that kind's remaining suggestions |
 | `ignored` | still on offer when the card closed |
-| `superseded` | from an earlier attempt; a re-check (answered assumption, retry, new settings) replaced it |
+| `superseded` | from an earlier revision; a re-check (answered assumption, retry, new settings) that offered a revision of its own replaced it |
 
-Session outcome is one of `applied` (changes went back to the app), `copied` (nothing applied, text copied), `none` (closed with nothing), `failed` (last attempt failed), `abandoned` (never closed: the process died; marked on next start).
+Rules at the close, as `SessionRecording` applies them:
+
+- **Something went back to the app** (`finalText` set): applied, then retired, then copied, then undone, then ignored; the first that holds.
+- **Nothing went back**: nothing is `accepted`. What was copied is `copied`; a fix inside an accepted rewording that was copied is `retired`; whatever else was accepted at some point is `undone`; the rest `ignored`.
+- **A failed or unclear attempt keeps the previous revision decided.** The card keeps that revision's accepted changes and applies them if the writer replaces the text, so only an attempt that offers a revision makes the previous one's suggestions `superseded`.
+- **What was accepted and copied is tracked per revision.** A re-check carries identical accepted edits over as new edits, and they count as accepted in the new revision.
+- **`reusedFrom`**: an attempt answered from a kept verdict records the session it came from; its suggestions are recorded like any other attempt's.
+
+Session outcome is one of `applied` (`finalText` set: changes went back to the app), `copied` (nothing applied, something copied), `failed` (nothing applied or copied, and the last attempt failed), `none` (closed with nothing), `abandoned` (never closed: the process died; marked on next start). Applied wins over copied, copied over failed. `outcome` is null while the session is open. The `status` column holds what the last successful attempt found (`ok`, `unclear`, `wrong_language`), so a check that came back unclear is told apart from one that was fine and had nothing to suggest.
 
 These are the facts the insight feature needs: *this writer makes agreement mistakes in Catalan and takes the fix 90% of the time; the model keeps suggesting "quedar" and the writer ignores it.*
 
 ## Data model
 
-Two tables. Rows are immutable once the session closes, except for soft deletion. Everything is designed so a row can be uploaded as-is later.
+Two tables. Rows are immutable once the session closes. Everything is designed so a row can be uploaded as-is later.
 
-**Every row has:** `id` (client-generated UUID, never an autoincrement), `createdAt` / `updatedAt` (epoch ms, UTC), `deletedAt` (soft delete; the row stays until a sync could carry the deletion), `deviceId` (a random UUID made once per install), `schema` (integer, the shape of this row).
+**Every row has:** `id` (client-generated UUID, never an autoincrement), `createdAt` / `updatedAt` (epoch ms, UTC), `deletedAt` (reserved for sync; always null today, see *Sync-readiness*), `deviceId` (a random UUID made once per install), `schema` (integer, the shape of this row).
+
+**Stored values.** Enums are stored as fixed lowercase tokens (`history/Stored.kt`), spelled out rather than derived from constant names, the same in the database, the export and settings. A token this build doesn't know (written by a newer one) reads as null and never crashes; a suggestion with an unknown kind or decision is skipped.
+
+| Field | Tokens |
+|---|---|
+| `origin` | `menu` · `button` · `tester` |
+| `outcome` | `applied` · `copied` · `none` · `failed` · `abandoned` |
+| `status` | `ok` · `unclear` · `wrong_language` |
+| suggestion `kind` | `fix` · `natural` |
+| suggestion `decision` | `accepted` · `undone` · `retired` · `copied` · `ignored` · `superseded` |
+| `punctuation` | `strict` · `moderate` · `casual` |
+| `judgments` | `both` · `fix` · `naturalize` |
+| `provider` | `gemini` · `openai` |
 
 ### `sessions`, one per time the card opens
 
 | Column | Notes |
 |---|---|
 | `startedAt`, `closedAt` | `closedAt` null while open |
-| `origin` | `menu` · `button` · `tester` |
-| `hostApp` | package name of the app the text came from; null for the tester. Optional, see questions |
-| `requestedLanguage` | `Catalan` · `Spanish` · null for auto |
-| `language` | what the model judged the text as. **New verdict field**, see *Prompt changes* |
+| `origin` | see above |
+| `hostApp` | package name of the app the text came from (menu: the calling package; button: the field's package); null for the tester or when unknown |
+| `requestedLanguage` | the language name the writer asked for; null for auto |
 | `text` | what was checked |
 | `textHash` | short hash, for "same message checked again" without comparing texts |
 | `finalText` | what went back to the app; null when nothing was applied |
-| `outcome` | see above |
-| `failure` | `CheckFailure.Reason`, when `outcome = failed` |
-| `punctuation`, `judgments` | the settings in force; they change what gets suggested |
+| `outcome`, `status` | see above |
+| `punctuation`, `judgments` | the settings in force, as tokens; they change what gets suggested |
 | `provider`, `model`, `promptHash`, `appVersion` | so verdicts from different models and prompt versions aren't compared as if equal |
-| `attempts` | JSON: `[{at, settled: [{about, answer}], verdict (raw), failure?}]`. The audit trail; never queried, kept so anything can be re-derived |
+| `attempts` | JSON: `[{at, settled: [{about, answer}], verdict (raw), failure?, failureDetail?, reusedFrom?}]`. The audit trail; never queried, kept so anything can be re-derived. `failure` is a `CheckFailure.Reason` name; the language the model judged the text as is in the raw verdict, not a column |
 | `meaning` | from the last successful attempt |
 
 ### `suggestions`, one per edit the writer saw
@@ -116,9 +136,9 @@ Two tables. Rows are immutable once the session closes, except for soft deletion
 |---|---|
 | `sessionId` | FK |
 | `attempt` | index into the session's attempts |
-| `kind` | `fix` · `natural` |
+| `kind` | see above |
 | `start`, `end`, `fromText`, `toText`, `why` | as the card showed it, positions in the session's `text` |
-| `decision`, `decidedAt` | see above |
+| `decision`, `decidedAt` | see *Decisions, defined* |
 
 Why not an event log? An append-only log of every tap is the purest shape for sync and would capture undo trajectories exactly, but it needs projection code from day one to show anything, and the insight feature would be a projection too. Two tables that a human can read in a SQLite browser, with the raw verdicts kept as JSON for anything we didn't think of, is the smaller debt. The `attempts` JSON is the escape hatch: if a future question needs something the columns don't have, it's in there.
 
@@ -129,19 +149,19 @@ Why not one JSON document per session? It would be simplest to write, but `sugge
 What's done now so a server later is additive:
 
 - UUIDs and `deviceId`: rows from two phones merge without collisions.
-- `updatedAt` and soft delete: "everything changed since last sync" is one query, and deletions travel.
+- `updatedAt`: "everything changed since last sync" is one query.
 - `schema` and `promptHash` versions on the rows: the server never has to guess how to read an old row.
-- The row classes are `@Serializable` Kotlin: the wire format is the storage format. Versioned, so that coupling is a feature, not a trap.
+- The row classes are `@Serializable` Kotlin: the wire format is the storage format (the export writes a `SessionDetail` per line). Versioned, so that coupling is a feature, not a trap.
 - Nothing in a row depends on local state (no int ids, no references to settings).
 
-What isn't done: a `syncState` table, an uploader, auth, conflict rules. When it comes: last-write-wins by `updatedAt`; with one writer per device that's never wrong in practice.
+What isn't done, and what changed from the first plan:
 
-## Prompt changes (prerequisite)
+- **Deletes are hard deletes.** Delete-one and Clear remove the rows (suggestions go by cascade), because the writer asked for the text to be gone and nothing exists yet to carry a tombstone. The `deletedAt` columns exist and every query filters on them, but nothing sets them. So deletions do **not** travel today: when sync is built it needs either soft deletes from then on or a record of deleted ids, and rows deleted before that can't be told apart from rows never uploaded.
+- No `syncState` table, uploader, auth or conflict rules. When it comes: last-write-wins by `updatedAt`; with one writer per device that's never wrong in practice.
 
-One field the verdict doesn't have today, cheap in tokens:
+## Prompt changes (prerequisite, done)
 
-1. **`language`**: the language the model judged the text as, as a name ("Catalan", "Spanish", "French", …), always filled, including when `status` is `wrong_language` (then it's the language it actually found). Without this, auto-detected checks can't be grouped by language. Side benefit for the card: "Not Catalan — this looks like Spanish."
-The eval script and its cases get the new field; the prompt's examples get `language` values.
+The verdict has a **`language`** field: the language the model judged the text as, as a name ("Catalan", "Spanish", "French", …); empty when the text is unclear, and the language it actually found when `status` is `wrong_language`. Auto-detected checks can be grouped by language from it (it's in the raw verdict kept in `attempts`), and the card says what a wrong-language text looks like it is. The prompt's examples and the eval script's cases carry it.
 
 No mistake categories are assigned at check time. The insight feature will hand a model the raw edits (from, to, why) across the whole history and let it find the patterns; at this scale that's one or two calls, it's consistent across all of history, and the structure (if any) is chosen with data in hand.
 
@@ -159,7 +179,7 @@ Two smaller problems: that header (picker + gear) only exists on the accessibili
 
 **History should reach the card as data, never as navigation.** The in-the-moment uses of history don't need a button:
 
-- *Instant re-open.* Checking the same text again within a few minutes (closed by accident, app lost the card) reuses the stored verdict: no model call, no wait. Free, invisible, and the first thing that makes the recording pay.
+- *Instant re-open.* Checking the same text again within a few minutes (closed by accident, app lost the card) reuses the stored verdict: no model call, no wait. Free, invisible, and the first thing that makes the recording pay. See *Reusing a kept answer*.
 - *"You've had this fix before."* A fix on the card can carry one quiet line ("4th time this month"). That's the insight feature arriving in-situ. Later; noted here so the data supports it (it does: `fromText`, `toText`, `decision`).
 
 ### The launcher screen becomes Home
@@ -175,10 +195,10 @@ Today the launcher screen is Settings with a tester at the bottom. The tester an
 > ▸ 9 Oct · Telegram · "Com estàs amb la pluja?" · looks good
 > …
 
-- Tap a row: the check opens below it or on a page, rendered with the card's content, read-only, with Copy. Delete from there.
+- Tap a row: the check opens on its own page, rendered with the card's content, read-only, with Copy. Delete from there, or swipe the row away; either deletes for good once the moment to undo has passed.
 - Insights, later, are a strip between the text box and the list. They don't need a new screen either.
 - The gear (top right) opens **Settings**: the existing Checking, Model and Apps-without-the-menu sections, plus a History section (toggle, count, Clear, Export). Browsing lives on Home; controls live in Settings.
-- Two screens, a `BackHandler` and a `screen` state in the activity. No navigation library until there's a third.
+- Three screens of one activity (Home, Settings, and a past check's page), a `BackHandler` and a `Screen` state. No navigation library.
 - The overlay's gear keeps opening the same activity.
 
 Design debt this removes: the app's most interesting content was heading for a settings section, and the launcher screen was going to need splitting anyway when insights arrived. Doing it now is one move instead of two, and it's mostly moving sections that already exist.
@@ -201,26 +221,44 @@ The glyph is Material's `history`: a clock with a counter-clockwise arrow. It's 
 ### Privacy, stated plainly
 
 - Nothing leaves the phone. The data extraction rules already exclude the app from backups and device transfer, so history doesn't land in Google's cloud.
-- The tester's text is recorded like any other check, tagged `origin = tester`, and the insight feature excludes it by default. "Everything you check" is simple to explain; exceptions aren't.
-- Failed checks are recorded (half the reliability story) and hidden from Recent by default.
+- The tester's text is recorded like any other check, tagged `origin = tester`, and the insight feature should exclude it by default. Recent doesn't separate it yet. "Everything you check" is simple to explain; exceptions aren't.
+- Failed checks are recorded (half the reliability story). They are not hidden from Recent yet; a failed row shows in the error colour.
 - Read-only selections are recorded; their suggestions can only end as `copied` or `ignored`.
-- Column encryption with the existing Keystore key is possible and costs: no SQL over text, slower lists, more code, and a server couldn't read it. The sandbox plus backup exclusion is the right level while the app is personal or among friends. Before friends install: the History section's wording is the consent, and recording should be shown once (a line on Home the first time), not assumed.
+- Column encryption with the existing Keystore key is possible and costs: no SQL over text, slower lists, more code, and a server couldn't read it. The sandbox plus backup exclusion is the right level while the app is personal or among friends. Before friends install: the History section's wording is the consent, and recording should be shown once (a line on Home the first time), not assumed. That line isn't built; Recent only says so when history is off.
+
+## While a card is open
+
+A session is saved when the card opens and written for the last time when it closes, and the writer can clear, delete or turn off history in between (from Settings or Recent while a card is up). The rules:
+
+- **Clear, or delete of that session**: final. `SqliteHistoryStore` remembers what was cleared or deleted in this process and, in the same transaction as the write, drops a later save or close of a session started before the clear, or of a deleted one. The row doesn't come back.
+- **Turn off**: `enabled` is read before every write. Once it's off, the open session stops being recorded: nothing more is written for it, its close included. Its row stays open (invisible in Recent, which lists closed sessions only) and is marked `abandoned` when the app next starts.
+- **A closed session is final**: a save arriving after the close is dropped. The save is an update in place, never a replace, which would delete the row and cascade to its suggestions.
+- A session still open when the process ended is marked `abandoned` at the next start; sessions opened since the process began are left alone.
+
+## Reusing a kept answer
+
+On a fresh check, `CheckHistory.firstAttempt` starts the model request first, before any history work. Then it opens the session and, on the application scope, looks for a kept verdict while the request runs. Whichever answers first wins:
+
+- the kept verdict arrives first: it is turned into a result, shown, and the request is cancelled; the attempt records `reusedFrom`;
+- the model answers first (or the lookup finds nothing, or fails): the model's answer is shown at once and the lookup is cancelled. The lookup can never add latency.
+
+A session qualifies when it has the same text hash, requested language, punctuation, judgments, provider, model and prompt hash; started within 10 minutes of the new one; is closed and not `failed`; and its last attempt succeeded. The newest match wins. Nothing is looked up when history is off or the text isn't recorded.
 
 ## Requirements
 
-### Must have (v1)
+### Must have (v1), all built
 
-- [ ] `language` in the verdict schema, prompt, examples and eval.
-- [ ] `HistoryStore` interface; SQLite implementation with `sessions` and `suggestions`; DB created lazily; all I/O off the main thread.
-- [ ] `HistoryRecorder` (pure Kotlin) with tests for every decision and outcome in the tables above, including: undo after accept, rewording retiring a fix, Copy, re-check superseding, a failed attempt, close with nothing.
-- [ ] `CheckViewModel` reports to the recorder; `check()` takes an `origin`; the three hosts pass it.
-- [ ] Open sessions found on process start are marked `abandoned`.
-- [ ] Launcher screen split into Home (text box, result card, Recent list) and Settings (gear); `BackHandler`, no nav library.
-- [ ] Recent list on Home, newest first; tap opens the check rendered with the card's content; delete one.
-- [ ] Settings · History section: toggle, count, Clear, Export (JSON Lines via the share sheet).
-- [ ] Same text checked again within 10 minutes reuses the stored verdict instead of calling the model.
-- [ ] Card latency unchanged: no history work on the path between tapping Linguize and the request leaving.
-- [ ] `App` gains an application scope; the close write uses it.
+- [x] `language` in the verdict schema, prompt, examples and eval.
+- [x] `HistoryStore` interface; SQLite implementation with `sessions` and `suggestions`; DB created lazily; all I/O off the main thread.
+- [x] `SessionRecording` (pure Kotlin) with tests for the decisions and outcomes in the tables above, including: undo after accept, rewording retiring a fix, Copy, re-check superseding, a failed attempt, close with nothing.
+- [x] `CheckViewModel` reports to `CheckHistory`; `check()` takes an `origin`; the hosts pass it.
+- [x] Open sessions found on process start are marked `abandoned`.
+- [x] Launcher screen split into Home (text box, result card, Recent list) and Settings (gear); `BackHandler`, no nav library.
+- [x] Recent list on Home, newest first (the latest 50); tap opens the check rendered with the card's content; delete one.
+- [x] Settings · History section: toggle, count, Clear, Export (JSON Lines via the share sheet).
+- [x] Same text checked again within 10 minutes reuses the stored verdict instead of calling the model.
+- [x] Card latency unchanged: the request leaves before any history work.
+- [x] `App` has an application scope; the close write uses it.
 
 Acceptance, the ones worth spelling out:
 
@@ -232,7 +270,7 @@ Acceptance, the ones worth spelling out:
 
 ### Should have (v1.5)
 
-- [ ] `hostApp` recorded (menu: `callingPackage`; button: the field's package) and shown in Recent.
+- [x] `hostApp` recorded (menu: `callingPackage`; button: the field's package) and shown in Recent.
 - [ ] Recent hides failed checks and the tester by default, with a way to show them.
 
 ### Later (designed for, not built)
@@ -245,14 +283,14 @@ Acceptance, the ones worth spelling out:
 
 Taken on, deliberately:
 
-- **Hand-written SQL on the framework's SQLite** instead of Room. No new dependency and no code generation (a KSP version can't be verified against this toolchain without CI round-trips), at the cost of writing two tables' worth of SQL and Flows by hand. A test checks every record field has a column. Room or SQLDelight remain an easy swap behind `HistoryStore`.
-- **An application coroutine scope.** One new concept; it exists for the close write and nothing else should grow on it.
+- **Hand-written SQL on the framework's SQLite** (`SQLiteOpenHelper`) instead of Room. No new dependency and no code generation (a KSP version can't be verified against this toolchain without CI round-trips), at the cost of writing two tables' worth of SQL and Flows by hand. A test checks every record field has a column. Room or SQLDelight remain an easy swap behind `HistoryStore`.
+- **An application coroutine scope.** One new concept; it exists for writes that must outlive a screen (the close write, Clear, a committed delete) and nothing else should grow on it.
 - **`origin` on `check()`.** One more parameter on the view model's entry point.
 
 Avoided:
 
 - No event-sourcing machinery, no DI framework, no navigation library, no encryption library, no sync scaffolding, no analytics.
-- No change to the card's behaviour or to `core/`. The edit engine doesn't know history exists.
+- No change to the card's behaviour. `core/` gained only small things the recording reads (`Verdict.language`, `Revision.isApplied` and `isRetired`, `WrongLanguage.found`); the edit engine doesn't know history exists.
 - No second copy of the data model for the wire: the row classes are the payload.
 
 
@@ -260,10 +298,11 @@ Avoided:
 
 - Home-first (above) or the original idea (a settings section plus a history button on the card)? The spec argues for Home-first; it's the founder's call.
 - Whether the raw verdict in `attempts` needs a size cap (a 3,000-character text twice over plus lists is ~15 KB; fine, but confirm).
+- Soft deletes or a deleted-ids record before sync (see *Sync-readiness*).
 
 ## Phasing
 
 0. Prompt: `language`, examples, eval. Ship on its own; it's visible nowhere and de-risks the rest.
-1. Record: store, recorder, view-model hook; Home/Settings split with the Recent list and the History section; export. Ship. Let it run.
-2. Host app in Recent; filters; instant re-open polish.
+1. Record: store, recording, view-model hook; Home/Settings split with the Recent list and the History section; export; instant re-open; host app in Recent. Built.
+2. Filters (failed checks, tester); a first-time line about recording.
 3. Insights: a separate spec, written once there are a few hundred fixes to look at.
