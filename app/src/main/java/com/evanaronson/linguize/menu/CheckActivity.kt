@@ -53,13 +53,21 @@ class CheckActivity : ComponentActivity() {
         }
     }
 
-    /** However the card closes (Done, back, tapping outside, Copy), accepted changes go back to the app. */
+    /**
+     * However the card closes (Done, back, tapping outside, Copy), accepted changes go back
+     * to the app. History is told here whether they did, while the check is still open: the
+     * view model going away later records nothing as applied.
+     */
     override fun finish() {
         val accepted = check.workingText
         val selection = selection
-        if (accepted != null && selection != null) {
+        val handedBack = if (accepted != null && selection != null) {
             setResult(RESULT_OK, Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, selection.with(accepted)))
+            true
+        } else {
+            false
         }
+        check.dismiss(applied = handedBack)
         super.finish()
     }
 }

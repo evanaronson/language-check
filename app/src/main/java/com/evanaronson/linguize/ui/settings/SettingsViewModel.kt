@@ -55,6 +55,14 @@ sealed interface ModelList {
 /** How much history is kept: [count] checks, the oldest from [since]. */
 data class KeptHistory(val count: Int, val since: Long?)
 
+/** A finished export, waiting for the screen to offer it. */
+sealed interface Export {
+    /** Written; [uri] is a shareable link to the file. */
+    data class Ready(val uri: Uri) : Export
+
+    data object Failed : Export
+}
+
 /** The result of trying the chosen model with a short check. */
 sealed interface ModelTest {
     data object Testing : ModelTest
@@ -77,6 +85,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     /** An export is being written. */
     var exporting by mutableStateOf(false)
+        private set
+
+    /**
+     * The export just finished, until the screen showing settings has offered it and called
+     * [exportOffered]. State rather than a callback, so the share sheet opens from the
+     * activity on screen even when the one that asked was recreated meanwhile.
+     */
+    var exported by mutableStateOf<Export?>(null)
         private set
 
     init {
@@ -177,20 +193,22 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Writes all history to a JSON Lines file in the cache and hands [onReady] a
-     * shareable link to it, or null if it couldn't be written. Replaces earlier exports.
+     * Writes all history to a JSON Lines file in the cache, replacing earlier exports, and
+     * sets [exported] to a shareable link to it, or to [Export.Failed].
      */
-    fun exportHistory(onReady: (Uri?) -> Unit) {
+    fun exportHistory() {
         if (exporting) return
         exporting = true
+        exported = null
         viewModelScope.launch {
             val uri = withContext(Dispatchers.IO) {
                 try {
                     val folder = File(app.cacheDir, EXPORTS).apply { mkdirs() }
                     folder.listFiles()?.forEach { it.delete() }
                     val file = File(folder, "linguize-history-${LocalDate.now()}.jsonl")
-                    file.outputStream().buffered().use { app.history.export(it) }
-                    FileProvider.getUriForFile(app, "${app.packageName}.files", file)
+                    val written = file.outputStream().buffered().use { app.history.export(it) }
+                    // A partial file isn't worth sharing.
+                    if (written) FileProvider.getUriForFile(app, "${app.packageName}.files", file) else null
                 } catch (_: IOException) {
                     null
                 } catch (_: IllegalArgumentException) {
@@ -199,8 +217,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 }
             }
             exporting = false
-            onReady(uri)
+            exported = uri?.let { Export.Ready(it) } ?: Export.Failed
         }
+    }
+
+    /** The screen has offered [exported]; it isn't offered again. */
+    fun exportOffered() {
+        exported = null
     }
 
     private fun loadModels() {

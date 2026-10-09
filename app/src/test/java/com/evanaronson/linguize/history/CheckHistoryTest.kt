@@ -1,0 +1,313 @@
+package com.evanaronson.linguize.history
+
+import com.evanaronson.linguize.core.CheckResult
+import com.evanaronson.linguize.core.EditKind
+import com.evanaronson.linguize.core.Judgments
+import com.evanaronson.linguize.core.Punctuation
+import com.evanaronson.linguize.core.Settled
+import com.evanaronson.linguize.core.Verdict
+import com.evanaronson.linguize.core.interpret
+import com.evanaronson.linguize.llm.Provider
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
+import org.junit.Test
+import java.io.OutputStream
+
+/** The history lifecycle of a card, against a store that only remembers what it was asked. */
+class CheckHistoryTest {
+    private val rain = "Com estas amb la pluja?"
+    private val verdict = Verdict(
+        status = Verdict.Status.Ok,
+        hasErrors = true,
+        corrected = "Com estàs amb la pluja?",
+        moreNatural = true,
+        natural = "Com portes la pluja?",
+    )
+    private val result = interpret(rain, verdict) as CheckResult.Reviewed
+
+    private val opening = Opening(
+        origin = Origin.Menu,
+        hostApp = "org.telegram.messenger",
+        requestedLanguage = "Catalan",
+        punctuation = Punctuation.Moderate,
+        judgments = Judgments.FixOnly,
+        provider = Provider.OpenAI,
+        model = "a-model",
+        promptHash = "p1",
+    )
+
+    private val store = FakeStore()
+    private val environment = object : HistoryEnvironment {
+        @Volatile override var enabled = true
+        override val deviceId = "device"
+        override val appVersion = "1.0"
+    }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var now = 1_000L
+    private val logged: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
+    private var ids = 0
+    private val history = CheckHistory(
+        store = store,
+        environment = environment,
+        scope = scope,
+        clock = { now },
+        log = { message, _ -> logged += message },
+        maxChars = 100,
+        newId = { "id${ids++}" },
+    )
+
+    @After
+    fun stop() = scope.cancel()
+
+    @Test
+    fun aCardIsOneSessionSavedAtOpenAfterEachAttemptAndClosed() = runBlocking<Unit> {
+        val opened = history.open(rain, opening)!!
+        assertEquals("moderate", opened.punctuation)
+        assertEquals("fix", opened.judgments)
+        assertEquals("openai", opened.provider)
+        assertEquals("device", opened.deviceId)
+        assertEquals("1.0", opened.appVersion)
+        assertEquals(1_000, opened.startedAt)
+
+        now = 1_100
+        history.succeeded(emptyList(), "{}", result)
+        val fixed = result.revision.acceptAll(EditKind.Fix)
+        history.changed(fixed)
+        now = 1_200
+        history.close(fixed.workingText)
+        history.flush()
+
+        assertEquals(listOf("save", "save", "close"), store.calls.map { it.first })
+        val (_, closed, suggestions) = store.calls.last()
+        assertEquals(Outcome.Applied, closed.outcome)
+        assertEquals(Verdict.Status.Ok, closed.status)
+        assertEquals(1, closed.attempts.size)
+        assertEquals(Decision.Accepted, suggestions.single { it.kind == EditKind.Fix }.decision)
+        assertNull(history.session)
+    }
+
+    @Test
+    fun closingTwiceOrWithNothingOpenWritesNothingMore() = runBlocking<Unit> {
+        history.close(null)
+        history.open(rain, opening)
+        history.close(null)
+        history.close(null)
+        history.flush()
+        assertEquals(listOf("save", "close"), store.calls.map { it.first })
+    }
+
+    @Test
+    fun withHistoryOffNothingIsWritten() = runBlocking<Unit> {
+        environment.enabled = false
+        assertNull(history.open(rain, opening))
+        history.succeeded(emptyList(), "{}", result)
+        history.close(rain)
+        history.flush()
+        assertTrue(store.calls.isEmpty())
+    }
+
+    @Test
+    fun turningHistoryOffStopsRecordingTheOpenSession() = runBlocking<Unit> {
+        history.open(rain, opening)
+        history.flush()
+        environment.enabled = false
+        history.succeeded(emptyList(), "{}", result)
+        environment.enabled = true
+        history.changed(result.revision.acceptAll(EditKind.Fix))
+        history.close(rain)
+        history.flush()
+        assertEquals(listOf("save"), store.calls.map { it.first })
+        assertNull(history.session)
+    }
+
+    @Test
+    fun aTextTooLongToCheckIsntRecorded() = runBlocking<Unit> {
+        assertNull(history.open("x".repeat(101), opening))
+        history.failed(emptyList(), "TooLong", null)
+        history.close(null)
+        history.flush()
+        assertTrue(store.calls.isEmpty())
+    }
+
+    @Test
+    fun aFailedAttemptIsRecorded() = runBlocking<Unit> {
+        history.open(rain, opening)
+        history.failed(listOf(Settled("tu", "informal")), "Offline", "no network")
+        history.close(null)
+        history.flush()
+        val closed = store.calls.last().second
+        assertEquals(Outcome.Failed, closed.outcome)
+        assertEquals("Offline", closed.attempts.single().failure)
+        assertEquals(listOf(SettledAnswer("tu", "informal")), closed.attempts.single().settled)
+    }
+
+    @Test
+    fun aStoreThatFailsDoesntBreakTheCard() = runBlocking<Unit> {
+        store.failing = true
+        history.open(rain, opening)
+        history.succeeded(emptyList(), "{}", result)
+        history.close(null)
+        history.flush()
+        assertEquals(3, logged.size)
+    }
+
+    @Test
+    fun theModelsAnswerIsUsedWhenThereIsNothingKept() = runBlocking<Unit> {
+        val answer = history.firstAttempt(rain, opening, ask = { "model" }, reuse = { "kept" })
+        assertEquals(Answer("model", null), answer)
+    }
+
+    @Test
+    fun aKeptVerdictThatArrivesFirstIsShownAndTheRequestCancelled() = runBlocking<Unit> {
+        store.kept = keptSession("earlier", "{\"status\":\"ok\"}")
+        var cancelled = false
+        val answer = history.firstAttempt(
+            rain,
+            opening,
+            ask = {
+                try {
+                    delay(10_000)
+                    "model"
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    cancelled = true
+                    throw e
+                }
+            },
+            reuse = { kept -> "kept ${kept.verdict}" },
+        )
+        assertEquals("kept {\"status\":\"ok\"}", answer.value)
+        assertEquals("earlier", answer.reused?.sessionId)
+        assertEquals(listOf(Settled("tu", "informal")), answer.reused?.settled)
+        assertTrue(cancelled)
+
+        // The lookup asked for the same text and settings, from the last ten minutes.
+        val (key, since) = store.lookedUp.single()
+        assertEquals(SessionRecording.hash(rain), key.textHash)
+        assertEquals("Catalan", key.requestedLanguage)
+        assertEquals("fix", key.judgments)
+        assertEquals(1_000 - CheckHistory.REUSE_WITHIN_MS, since)
+
+        history.succeeded(answer.reused!!.settled, answer.reused!!.verdict, result, reusedFrom = answer.reused!!.sessionId)
+        history.close(null)
+        history.flush()
+        assertEquals("earlier", store.calls.last().second.attempts.single().reusedFrom)
+    }
+
+    @Test
+    fun aSlowLookupNeverHoldsUpTheModelsAnswer() = runBlocking<Unit> {
+        store.kept = keptSession("earlier", "{}")
+        store.gate = CompletableDeferred()
+        val answer = withTimeout(5_000) {
+            history.firstAttempt(rain, opening, ask = { "model" }, reuse = { "kept" })
+        }
+        assertEquals(Answer("model", null), answer)
+        store.gate!!.complete(Unit)
+    }
+
+    @Test
+    fun aKeptVerdictThatCantBeReadFallsBackToTheModel() = runBlocking<Unit> {
+        store.kept = keptSession("earlier", "{}")
+        val answer = history.firstAttempt(
+            rain,
+            opening,
+            ask = {
+                delay(200)
+                "model"
+            },
+            reuse = { null },
+        )
+        assertEquals(Answer("model", null), answer)
+    }
+
+    @Test
+    fun theModelsFailureIsThrownAsIs() = runBlocking<Unit> {
+        try {
+            history.firstAttempt<String>(rain, opening, ask = { throw IllegalStateException("offline") }, reuse = { "kept" })
+            fail()
+        } catch (e: IllegalStateException) {
+            assertEquals("offline", e.message)
+        }
+        assertTrue(history.session != null)
+    }
+
+    @Test
+    fun withHistoryOffThereIsNoLookup() = runBlocking<Unit> {
+        environment.enabled = false
+        store.kept = keptSession("earlier", "{}")
+        val answer = history.firstAttempt(
+            rain,
+            opening,
+            ask = {
+                delay(100)
+                "model"
+            },
+            reuse = { "kept" },
+        )
+        assertEquals("model", answer.value)
+        assertTrue(store.lookedUp.isEmpty())
+        assertFalse(store.calls.isNotEmpty())
+    }
+
+    @Test
+    fun theStatusFollowsTheResult() {
+        assertEquals(Verdict.Status.Ok, CheckHistory.statusOf(result))
+        assertEquals(Verdict.Status.Unclear, CheckHistory.statusOf(CheckResult.Unclear))
+        assertEquals(Verdict.Status.WrongLanguage, CheckHistory.statusOf(CheckResult.WrongLanguage("Catalan", "Spanish")))
+    }
+
+    private fun keptSession(id: String, verdict: String) = SessionRecording(rain, SessionContext(
+        Origin.Menu, null, "Catalan", "moderate", "fix", "openai", "a-model", "p1", "1.0", "device",
+    ), 500, newId = { id }).also {
+        it.attempt(600, listOf(Settled("tu", "informal")), verdict, null, null, null, null)
+    }.close(700, null).session
+
+    private class FakeStore : HistoryStore {
+        val calls: MutableList<Triple<String, SessionRecord, List<SuggestionRecord>>> = java.util.Collections.synchronizedList(mutableListOf())
+        val lookedUp: MutableList<Pair<ReuseKey, Long>> = java.util.Collections.synchronizedList(mutableListOf())
+
+        @Volatile var failing = false
+
+        @Volatile var kept: SessionRecord? = null
+
+        @Volatile var gate: CompletableDeferred<Unit>? = null
+
+        override suspend fun save(session: SessionRecord) {
+            if (failing) error("disk full")
+            calls += Triple("save", session, emptyList())
+        }
+
+        override suspend fun close(session: SessionRecord, suggestions: List<SuggestionRecord>) {
+            if (failing) error("disk full")
+            calls += Triple("close", session, suggestions)
+        }
+
+        override suspend fun reusable(key: ReuseKey, since: Long): SessionRecord? {
+            lookedUp += key to since
+            gate?.await()
+            return kept
+        }
+
+        override suspend fun markAbandoned(now: Long) = Unit
+        override fun count(): Flow<Int> = flowOf(0)
+        override fun since(): Flow<Long?> = flowOf(null)
+        override fun recent(limit: Int): Flow<List<SessionSummary>> = flowOf(emptyList())
+        override suspend fun detail(id: String): SessionDetail? = null
+        override suspend fun delete(id: String) = Unit
+        override suspend fun clear() = Unit
+        override suspend fun export(out: OutputStream) = true
+    }
+}

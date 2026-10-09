@@ -27,7 +27,8 @@ import com.evanaronson.linguize.ui.theme.AppTheme
 /**
  * The launcher icon's activity: Home (try a check, recent checks), Settings behind the
  * gear, and a past check's page. A card's "Open settings" comes straight to Settings
- * through [settingsIntent], and back from there returns to the card.
+ * through [settingsIntent], and back from there returns to the card. If the activity was
+ * already open, that keeps what it showed (Try it's text, a past check) for next time.
  */
 class HomeActivity : ComponentActivity() {
     private val settings: SettingsViewModel by viewModels()
@@ -40,15 +41,22 @@ class HomeActivity : ComponentActivity() {
     /** Settings was opened from a card: back leaves for the card instead of going to Home. */
     private var backToCard = false
 
+    /**
+     * What this activity showed before a card opened Settings over it, to show again once
+     * back has left for the card. Null when the activity was started just for Settings.
+     */
+    private var beforeCard: Screen? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) {
-            show(intent)
+            show(intent, existing = false)
         } else {
             screen = Screen.restore(savedInstanceState.getString(SCREEN)) ?: Screen.Home
             backToCard = savedInstanceState.getBoolean(BACK_TO_CARD)
-            (screen as? Screen.Detail)?.let { session.load(it.id) }
+            beforeCard = Screen.restore(savedInstanceState.getString(BEFORE_CARD))
+            (screen as? Screen.Detail ?: beforeCard as? Screen.Detail)?.let { session.load(it.id) }
         }
         setContent {
             AppTheme {
@@ -79,13 +87,14 @@ class HomeActivity : ComponentActivity() {
     /** A card opened Settings while this activity was already at the top. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        show(intent)
+        show(intent, existing = true)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(SCREEN, screen.saved)
         outState.putBoolean(BACK_TO_CARD, backToCard)
+        outState.putString(BEFORE_CARD, beforeCard?.saved)
     }
 
     /** Going home or to recents. Links this screen opens say they're not the user leaving. */
@@ -99,10 +108,13 @@ class HomeActivity : ComponentActivity() {
         if (isFinishing) (application as App).settingsLeft.value++
     }
 
-    private fun show(intent: Intent) {
+    /** [existing]: the activity was already open, showing [screen], when [intent] came. */
+    private fun show(intent: Intent, existing: Boolean) {
         // Reopened from recents, the old intent comes again; the card it was for is long gone.
         val fromHistory = (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
         if (intent.getBooleanExtra(EXTRA_SETTINGS, false) && !fromHistory) {
+            // A second card's Settings over the first keeps what was shown before either.
+            if (!backToCard) beforeCard = if (existing) screen else null
             screen = Screen.Settings
             backToCard = true
         }
@@ -114,17 +126,26 @@ class HomeActivity : ComponentActivity() {
     }
 
     private fun back() {
-        if (screen == Screen.Settings && backToCard) {
-            finish()
-        } else {
+        if (screen != Screen.Settings || !backToCard) {
             screen = Screen.Home
+            return
         }
+        backToCard = false
+        val before = beforeCard ?: return finish()
+        // Back to the card's app, as finishing would, but without losing what this activity
+        // showed: it's there again the next time Linguize is opened.
+        beforeCard = null
+        screen = before
+        moveTaskToBack(true)
+        // Not finishing, and not the user leaving: tell a card waiting behind Settings directly.
+        (application as App).settingsLeft.value++
     }
 
     companion object {
         private const val EXTRA_SETTINGS = "com.evanaronson.linguize.extra.SETTINGS"
         private const val SCREEN = "screen"
         private const val BACK_TO_CARD = "backToCard"
+        private const val BEFORE_CARD = "beforeCard"
 
         /** Opens Settings from a card, reusing this activity if it's already on top. */
         fun settingsIntent(context: Context): Intent = Intent(context, HomeActivity::class.java)

@@ -1,6 +1,7 @@
 package com.evanaronson.linguize
 
 import com.evanaronson.linguize.core.CheckResult
+import com.evanaronson.linguize.core.Edit
 import com.evanaronson.linguize.core.Judgments
 import com.evanaronson.linguize.core.Language
 import com.evanaronson.linguize.core.Punctuation
@@ -8,6 +9,10 @@ import com.evanaronson.linguize.core.Settled
 import com.evanaronson.linguize.core.interpret
 import com.evanaronson.linguize.data.ApiKeys
 import com.evanaronson.linguize.data.Settings
+import com.evanaronson.linguize.history.Decision
+import com.evanaronson.linguize.history.SessionRecord
+import com.evanaronson.linguize.history.Stored
+import com.evanaronson.linguize.history.SuggestionRecord
 import com.evanaronson.linguize.llm.CheckFailure
 import com.evanaronson.linguize.llm.CheckRequest
 import com.evanaronson.linguize.llm.Prompt
@@ -74,6 +79,35 @@ class Checker(
         Checked(result, verdict, context)
     }
 
+    /**
+     * The card a past [session] ended with, rebuilt from its stored verdict, with the
+     * suggestions the writer took ([Decision.Accepted] in [suggestions]) accepted again.
+     * The verdict is the decided attempt's: the one the session's non-superseded
+     * suggestions came from, or else the last attempt that succeeded. Null when no attempt
+     * succeeded or the stored verdict can't be read. Pure computation; never throws.
+     */
+    fun replay(session: SessionRecord, suggestions: List<SuggestionRecord>): CheckResult? {
+        val succeeded = session.attempts.indices.filter { session.attempts[it].let { a -> a.verdict != null && a.failure == null } }
+        val decided = suggestions.filter { it.decision != Decision.Superseded }.maxOfOrNull { it.attempt }
+        val index = decided?.takeIf { it in succeeded } ?: succeeded.lastOrNull() ?: return null
+        val verdict = try {
+            prompt.parseVerdict(session.attempts[index].verdict ?: return null)
+        } catch (_: CheckFailure) {
+            return null
+        }
+        val judgments = Stored.judgments.decodeOrName(session.judgments) ?: Judgments.Both
+        val result = try {
+            interpret(session.text, verdict, judgments, expectedLanguage = session.requestedLanguage)
+        } catch (_: RuntimeException) {
+            return null
+        }
+        if (result !is CheckResult.Reviewed) return result
+        val taken = suggestions
+            .filter { it.attempt == index && it.decision == Decision.Accepted }
+            .map { Edit(id = -1, kind = it.kind, start = it.start, end = it.end, from = it.fromText, replacement = it.toText, why = it.why) }
+        return result.copy(revision = result.revision.acceptMatching(taken))
+    }
+
     /** Runs a short check with [model]; returns how long it took in milliseconds. */
     suspend fun testModel(provider: Provider, model: String): Long = failingAsCheckFailure {
         val started = System.nanoTime()
@@ -118,10 +152,10 @@ class Checker(
         }
     }
 
-    private companion object {
+    companion object {
         /** About a page. Longer selections are past what this tool is for and would be slow. */
         const val MAX_CHARS = 3000
 
-        val TEST_REQUEST = CheckRequest("Bon dia, com estas?", null, Punctuation.Moderate, Judgments.Both)
+        private val TEST_REQUEST = CheckRequest("Bon dia, com estas?", null, Punctuation.Moderate, Judgments.Both)
     }
 }

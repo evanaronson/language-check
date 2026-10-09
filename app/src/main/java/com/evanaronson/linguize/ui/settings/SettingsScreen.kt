@@ -16,11 +16,11 @@ import androidx.compose.ui.unit.dp
 import com.evanaronson.linguize.core.Judgments
 import com.evanaronson.linguize.core.Punctuation
 import com.evanaronson.linguize.data.MenuEntry
+import com.evanaronson.linguize.ui.components.BackButton
 import com.evanaronson.linguize.ui.components.Dropdown
 import com.evanaronson.linguize.ui.components.MultiSelectDropdown
 import com.evanaronson.linguize.ui.components.RadioRow
 import com.evanaronson.linguize.ui.components.SectionTitle
-import com.evanaronson.linguize.ui.home.BackButton
 
 /** How checks work, which model runs them, what's kept, and the accessibility button. Opened from Home's gear. */
 @Composable

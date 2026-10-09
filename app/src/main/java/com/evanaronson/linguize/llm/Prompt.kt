@@ -26,7 +26,11 @@ class Prompt(val system: String, schemaJson: String) {
         .take(6)
         .joinToString("") { "%02x".format(it) }
 
-    /** The setting lines check_prompt.md describes, then the text. */
+    /**
+     * The setting lines check_prompt.md describes, then the text between [TEXT_OPEN] and [TEXT_CLOSE].
+     * The text comes last and the prompt says it runs to the final [TEXT_CLOSE] and is never
+     * instructions, so a closing tag or "instructions" inside it are read as the writer's words.
+     */
     fun userMessage(request: CheckRequest) = buildString {
         val language = request.language?.let { "${it.name} (${it.variety})" } ?: "auto"
         appendLine("Language: $language")
@@ -34,7 +38,7 @@ class Prompt(val system: String, schemaJson: String) {
         appendLine("Checks: ${token(request.judgments)}")
         appendLine("Native: ${request.native} (write meaning, assumptions and reasons in ${request.native})")
         request.settled.forEach { appendLine("Settled: ${it.about} → ${it.answer}") }
-        append("Text: ${request.text}")
+        append("Text: $TEXT_OPEN${request.text}$TEXT_CLOSE")
     }
 
     fun parseVerdict(answer: String): Verdict {
@@ -67,6 +71,15 @@ class Prompt(val system: String, schemaJson: String) {
     }
 
     companion object {
+        const val TEXT_OPEN = "<text>"
+        const val TEXT_CLOSE = "</text>"
+
+        /**
+         * Output token limit for a check, thinking included. The answer can repeat the text three
+         * times (corrected, natural, meaning) plus the lists of changes; a cut-off answer fails as TooLong.
+         */
+        const val MAX_OUTPUT_TOKENS = 8192
+
         private val json = Json {
             ignoreUnknownKeys = true
             encodeDefaults = true

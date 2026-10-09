@@ -1,8 +1,10 @@
 package com.evanaronson.linguize.ui.history
 
+import com.evanaronson.linguize.core.Verdict
 import com.evanaronson.linguize.history.Origin
 import com.evanaronson.linguize.history.Outcome
 import com.evanaronson.linguize.history.SessionSummary
+import com.evanaronson.linguize.ui.components.shortDate
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -18,25 +20,23 @@ internal fun relativeDate(at: Long, now: Long, time: DateTimeFormatter, zone: Zo
     }
 }
 
-/** "9 Oct", with the year when it isn't this year. */
-internal fun shortDate(at: Long, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): String {
-    val moment = Instant.ofEpochMilli(at).atZone(zone)
-    val thisYear = moment.year == Instant.ofEpochMilli(now).atZone(zone).year
-    return DateTimeFormatter.ofPattern(if (thisYear) "d MMM" else "d MMM yyyy").format(moment)
-}
-
 /** Where the text came from: the app's name, "Try it" for the tester, or null when unknown. */
 internal fun source(origin: Origin, appLabel: String?): String? = if (origin == Origin.Tester) "Try it" else appLabel
 
 /** The first line with something on it, for a one-glance preview. */
 internal fun firstLine(text: String): String = text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }.orEmpty()
 
-/** What came of a check, in a few words: "3 fixes · 1 rewording · 2 taken", "Looks good", "Couldn't check". */
-internal val SessionSummary.status: String
+/**
+ * What came of a check, in a few words: "3 fixes · 1 rewording · 2 taken", "Looks good",
+ * "Couldn't check".
+ */
+internal val SessionSummary.statusLine: String
     get() = when {
         outcome == Outcome.Failed -> "Couldn't check"
         outcome == Outcome.Abandoned -> "Not finished"
-        fixes + rewordings == 0 -> "Looks good"
+        status == Verdict.Status.Unclear -> "Couldn't tell what it means"
+        status == Verdict.Status.WrongLanguage -> "Another language"
+        fixes + rewordings == 0 -> if (status == Verdict.Status.Ok) "Looks good" else "No suggestions"
         else -> listOfNotNull(
             count(fixes, "fix", "fixes"),
             count(rewordings, "rewording", "rewordings"),

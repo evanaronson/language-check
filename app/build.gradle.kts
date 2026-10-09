@@ -19,13 +19,19 @@ android {
         versionName = "0.1.$versionCode"
     }
 
+    // Release builds are signed with a key that lives only in GitHub Actions secrets, so each
+    // build installs over the previous one and nobody else can sign an "update". Local builds
+    // (no SIGNING_* variables) fall back to the debug key so assembleRelease still works.
+    val releaseKeystore = providers.environmentVariable("SIGNING_KEYSTORE_PATH").orNull
     signingConfigs {
-        // A fixed key so each new build installs over the previous one.
-        create("sideload") {
-            storeFile = file("signing/sideload.jks")
-            storePassword = "language-check"
-            keyAlias = "sideload"
-            keyPassword = "language-check"
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storeType = "pkcs12"
+                storePassword = providers.environmentVariable("SIGNING_STORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("SIGNING_KEY_ALIAS").get()
+                keyPassword = providers.environmentVariable("SIGNING_KEY_PASSWORD").get()
+            }
         }
     }
 
@@ -36,7 +42,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            signingConfig = signingConfigs.getByName("sideload")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 
@@ -47,6 +53,11 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    testOptions {
+        // Robolectric tests read the app's resources and manifest.
+        unitTests.isIncludeAndroidResources = true
     }
 }
 
@@ -68,4 +79,6 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }

@@ -61,9 +61,9 @@ class SessionRecordingTest {
     private fun SessionRecording.failed(at: Long) = attempt(at, emptyList(), null, "Network", "timeout", null, null)
 
     private fun SessionDetail.decisions(kind: EditKind) =
-        suggestions.filter { it.kind == kind.name.lowercase() }.map { it.decision }.toSet()
+        suggestions.filter { it.kind == kind }.map { it.decision }.toSet()
 
-    private fun SessionDetail.only(kind: EditKind) = suggestions.single { it.kind == kind.name.lowercase() }
+    private fun SessionDetail.only(kind: EditKind) = suggestions.single { it.kind == kind }
 
     @Test
     fun theSessionStartsOpenWithItsContext() {
@@ -113,7 +113,7 @@ class SessionRecordingTest {
         recording.succeeded(200, revision)
         val fix = recording.close(300, null).only(EditKind.Fix)
         val edit = revision.edits(EditKind.Fix).single()
-        assertEquals("fix", fix.kind)
+        assertEquals(EditKind.Fix, fix.kind)
         assertEquals("estas", fix.fromText)
         assertEquals("estàs", fix.toText)
         assertEquals(edit.start, fix.start)
@@ -212,17 +212,48 @@ class SessionRecordingTest {
     }
 
     @Test
-    fun aCopiedSectionKeepsWhatWasAcceptedBeforeTheCopy() {
+    fun aCopiedSectionCarriesWhatWasAcceptedBeforeTheCopy() {
         val recording = recording(rain)
         val reworded = rainRevision().acceptAll(EditKind.Natural)
         recording.succeeded(200, rainRevision())
         recording.changed(reworded)
         recording.copied(EditKind.Fix)
 
+        // Nothing went back to the app; the accepted rewording left in the copy, with the fix inside it.
         val detail = recording.close(300, null)
         assertEquals(Outcome.Copied, detail.session.outcome)
-        assertEquals(Decision.Accepted, detail.only(EditKind.Natural).decision)
+        assertEquals(Decision.Copied, detail.only(EditKind.Natural).decision)
         assertEquals(Decision.Retired, detail.only(EditKind.Fix).decision)
+    }
+
+    @Test
+    fun acceptedButNeverAppliedIsUndone() {
+        val recording = recording(rain)
+        val revision = rainRevision()
+        recording.succeeded(200, revision)
+        val reworded = revision.acceptAll(EditKind.Natural)
+        recording.changed(reworded)
+
+        val detail = recording.close(300, finalText = null)
+        assertEquals(Outcome.None, detail.session.outcome)
+        assertEquals(Decision.Undone, detail.only(EditKind.Natural).decision)
+        assertEquals(Decision.Ignored, detail.only(EditKind.Fix).decision)
+        assertTrue(detail.suggestions.none { it.decision == Decision.Accepted || it.decision == Decision.Retired })
+    }
+
+    @Test
+    fun acceptedThenCopiedWithoutApplyingIsCopied() {
+        val recording = recording(shower)
+        val revision = showerRevision()
+        recording.succeeded(200, revision)
+        val fixed = revision.acceptAll(EditKind.Fix)
+        recording.changed(fixed)
+        recording.copied(EditKind.Fix)
+
+        val detail = recording.close(300, finalText = null)
+        assertEquals(Outcome.Copied, detail.session.outcome)
+        assertEquals(setOf(Decision.Copied), detail.decisions(EditKind.Fix))
+        assertEquals(setOf(Decision.Ignored), detail.decisions(EditKind.Natural))
     }
 
     @Test
@@ -260,8 +291,8 @@ class SessionRecordingTest {
         assertTrue(old.all { it.decision == Decision.Superseded && it.decidedAt == 400L })
         assertEquals(second.edits.size, new.size)
         assertTrue(new.all { it.attempt == 1 && it.decidedAt == 500L })
-        assertEquals(Decision.Accepted, new.single { it.kind == "fix" }.decision)
-        assertEquals(Decision.Ignored, new.single { it.kind == "natural" }.decision)
+        assertEquals(Decision.Accepted, new.single { it.kind == EditKind.Fix }.decision)
+        assertEquals(Decision.Ignored, new.single { it.kind == EditKind.Natural }.decision)
         assertEquals(Outcome.Applied, detail.session.outcome)
     }
 
@@ -277,7 +308,7 @@ class SessionRecordingTest {
         recording.changed(second.undo())
 
         val detail = recording.close(500, null)
-        assertEquals(Decision.Undone, detail.suggestions.single { it.attempt == 1 && it.kind == "fix" }.decision)
+        assertEquals(Decision.Undone, detail.suggestions.single { it.attempt == 1 && it.kind == EditKind.Fix }.decision)
     }
 
     @Test
@@ -316,7 +347,7 @@ class SessionRecordingTest {
     }
 
     @Test
-    fun aFailedLastAttemptFailsTheSessionAndSupersedesTheOneBefore() {
+    fun aFailedLastAttemptFailsTheSessionAndLeavesTheOneBeforeDecided() {
         val recording = recording(rain)
         recording.succeeded(200, rainRevision())
         recording.failed(400)
@@ -324,7 +355,71 @@ class SessionRecordingTest {
         val detail = recording.close(500, null)
         assertEquals(Outcome.Failed, detail.session.outcome)
         assertEquals("meaning 200", detail.session.meaning)
-        assertTrue(detail.suggestions.all { it.decision == Decision.Superseded && it.decidedAt == 400L && it.attempt == 0 })
+        assertEquals(2, detail.session.attempts.size)
+        assertTrue(detail.suggestions.all { it.decision == Decision.Ignored && it.decidedAt == 500L && it.attempt == 0 })
+    }
+
+    @Test
+    fun editsAcceptedBeforeAFailedRecheckAreDecidedWithTheirAttempt() {
+        val recording = recording(rain)
+        val revision = rainRevision()
+        recording.succeeded(200, revision)
+        val fixed = revision.acceptAll(EditKind.Fix)
+        recording.changed(fixed)
+        recording.failed(400)
+
+        // The card still carries the accepted fix, and Replace applies it.
+        val detail = recording.close(500, fixed.workingText)
+        assertEquals(Outcome.Applied, detail.session.outcome)
+        assertTrue(detail.suggestions.all { it.attempt == 0 })
+        assertEquals(Decision.Accepted, detail.only(EditKind.Fix).decision)
+        assertEquals(Decision.Ignored, detail.only(EditKind.Natural).decision)
+    }
+
+    @Test
+    fun aRecheckThatSucceedsAfterAFailedOneSupersedesTheDecidedRevision() {
+        val recording = recording(rain)
+        recording.succeeded(200, rainRevision())
+        recording.failed(300)
+        recording.succeeded(400, rainRevision())
+
+        val detail = recording.close(500, null)
+        val (old, new) = detail.suggestions.partition { it.attempt == 0 }
+        assertTrue(old.isNotEmpty() && old.all { it.decision == Decision.Superseded && it.decidedAt == 400L })
+        assertTrue(new.isNotEmpty() && new.all { it.attempt == 2 && it.decision == Decision.Ignored })
+    }
+
+    @Test
+    fun changesBeforeAnyAttemptAreIgnored() {
+        val recording = recording(rain)
+        recording.changed(rainRevision().acceptAll(EditKind.Fix))
+        val detail = recording.close(300, "Com estàs amb la pluja?")
+        assertTrue(detail.suggestions.isEmpty())
+
+        val another = recording(rain)
+        another.changed(rainRevision().acceptAll(EditKind.Fix))
+        another.succeeded(200, rainRevision())
+        assertTrue(another.close(300, null).suggestions.all { it.attempt == 0 && it.decision == Decision.Ignored })
+    }
+
+    @Test
+    fun aReusedVerdictSaysWhereItCameFrom() {
+        val recording = recording(rain)
+        val session = recording.attempt(200, emptyList(), "{}", null, null, rainRevision(), "m", Verdict.Status.Ok, reusedFrom = "earlier")
+        assertEquals("earlier", session.attempts.single().reusedFrom)
+        assertEquals(Verdict.Status.Ok, session.status)
+        assertNull(recording(rain).succeeded(200, rainRevision()).attempts.single().reusedFrom)
+    }
+
+    @Test
+    fun theStatusIsTheLastSuccessfulAttempts() {
+        val recording = recording(rain)
+        recording.attempt(200, emptyList(), "{}", null, null, null, null, Verdict.Status.Unclear)
+        assertEquals(Verdict.Status.Unclear, recording.session.status)
+        recording.failed(300)
+        assertEquals(Verdict.Status.Unclear, recording.session.status)
+        recording.attempt(400, emptyList(), "{}", null, null, rainRevision(), "m", Verdict.Status.Ok)
+        assertEquals(Verdict.Status.Ok, recording.close(500, null).session.status)
     }
 
     @Test

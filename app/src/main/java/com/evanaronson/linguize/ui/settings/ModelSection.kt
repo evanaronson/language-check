@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -149,7 +150,8 @@ private fun SavedKey(provider: Provider, lastFour: String, onRemove: () -> Unit)
             Modifier.padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("✓", style = MaterialTheme.typography.titleMedium, color = onContainer)
+            // "key saved" says it; screen readers skip the tick.
+            Text("✓", style = MaterialTheme.typography.titleMedium, color = onContainer, modifier = Modifier.clearAndSetSemantics {})
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text("${provider.label} key saved", style = MaterialTheme.typography.titleSmall, color = onContainer)

@@ -25,31 +25,37 @@ class GeminiClient(private val http: OkHttpClient, private val prompt: Prompt) :
     private val noMinimalThinking = ConcurrentHashMap.newKeySet<String>()
 
     override suspend fun check(key: String, model: String, request: CheckRequest): Verdict {
-        val minimal = model !in noMinimalThinking
-        val call = Request.Builder()
-            .url("$BASE/models/$model:generateContent")
-            .header("x-goog-api-key", key)
-            .post(body(request, minimal).toString().toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-        val (code, payload) = http.newCall(call).await()
-        if (code == 400 && minimal && "thinking" in payload.lowercase()) {
-            noMinimalThinking += model
-            return check(key, model, request)
+        // One time limit for the whole check, the retry without minimal thinking included.
+        val deadline = Deadline(http)
+        var minimal = model !in noMinimalThinking
+        while (true) {
+            val call = Request.Builder()
+                .url("$BASE/models/$model:generateContent")
+                .header("x-goog-api-key", key)
+                .post(body(request, minimal).toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+            val (code, payload) = deadline.send(call)
+            if (code == 400 && minimal && "thinking" in payload.lowercase()) {
+                noMinimalThinking += model
+                minimal = false
+                continue
+            }
+            if (code != 200) throw failure(code, payload)
+            return prompt.parseVerdict(answer(payload))
         }
-        if (code != 200) throw failureFor(code, payload)
-        return prompt.parseVerdict(answer(payload))
     }
 
     override suspend fun models(key: String): List<String> {
         val ids = mutableListOf<String>()
+        val deadline = Deadline(http)
         var pageToken: String? = null
         do {
             val url = "$BASE/models".toHttpUrl().newBuilder()
                 .addQueryParameter("pageSize", "1000")
                 .apply { pageToken?.let { addQueryParameter("pageToken", it) } }
                 .build()
-            val (code, payload) = http.newCall(Request.Builder().url(url).header("x-goog-api-key", key).build()).await()
-            if (code != 200) throw failureFor(code, payload)
+            val (code, payload) = deadline.send(Request.Builder().url(url).header("x-goog-api-key", key).build())
+            if (code != 200) throw failure(code, payload)
             pageToken = readResponse(payload) { page ->
                 for (model in page["models"]?.jsonArray.orEmpty().map { it.jsonObject }) {
                     val id = model["name"]?.jsonPrimitive?.content?.removePrefix("models/") ?: continue
@@ -77,29 +83,42 @@ class GeminiClient(private val http: OkHttpClient, private val prompt: Prompt) :
         putJsonObject("generationConfig") {
             put("responseMimeType", "application/json")
             put("responseJsonSchema", prompt.schema)
-            // Room for a long paragraph twice over plus the list of changes.
-            put("maxOutputTokens", 4096)
+            put("maxOutputTokens", Prompt.MAX_OUTPUT_TOKENS)
             // Minimal thinking keeps a check inside the ~2 s budget.
             if (minimalThinking) putJsonObject("thinkingConfig") { put("thinkingLevel", "MINIMAL") }
         }
     }
 
-    /** The answer text, without any thought parts. */
-    private fun answer(payload: String): String = readResponse(payload) { root ->
-        val candidate = root["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
-            ?: throw CheckFailure(CheckFailure.Reason.BadResponse, "The model returned no answer")
-        val text = candidate["content"]?.jsonObject?.get("parts")?.jsonArray.orEmpty()
-            .map { it.jsonObject }
-            .filterNot { it["thought"]?.jsonPrimitive?.booleanOrNull == true }
-            .joinToString("") { it["text"]?.jsonPrimitive?.content.orEmpty() }
-        if (text.isBlank()) {
-            val finish = candidate["finishReason"]?.jsonPrimitive?.content ?: "unknown"
-            throw CheckFailure(CheckFailure.Reason.BadResponse, "The model returned no answer ($finish)")
-        }
-        text
-    }
-
-    private companion object {
+    internal companion object {
         const val BASE = "https://generativelanguage.googleapis.com/v1beta"
+
+        /** The answer text, without any thought parts. Throws [CheckFailure]; TooLong when it was cut off. */
+        fun answer(payload: String): String = readResponse(payload) { root ->
+            val candidate = root["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
+                ?: throw CheckFailure(CheckFailure.Reason.BadResponse, "The model returned no answer")
+            val finish = candidate["finishReason"]?.jsonPrimitive?.content
+            // Half a JSON object would only fail as "not in the expected format", and again on retry.
+            if (finish == "MAX_TOKENS") throw truncated()
+            val text = candidate["content"]?.jsonObject?.get("parts")?.jsonArray.orEmpty()
+                .map { it.jsonObject }
+                .filterNot { it["thought"]?.jsonPrimitive?.booleanOrNull == true }
+                .joinToString("") { it["text"]?.jsonPrimitive?.content.orEmpty() }
+            if (text.isBlank()) {
+                throw CheckFailure(CheckFailure.Reason.BadResponse, "The model returned no answer (${finish ?: "unknown"})")
+            }
+            text
+        }
+
+        /** An HTTP error, with what Gemini's own errors say on top of the status code. */
+        fun failure(code: Int, payload: String): CheckFailure {
+            val lower = payload.lowercase()
+            val reason = when {
+                code == 400 && "api_key_invalid" in lower -> CheckFailure.Reason.BadKey
+                // Gemini answers 403 for models a key isn't allowed to use, and 400 for options a model doesn't support.
+                (code == 403 || code == 400) && "model" in lower -> CheckFailure.Reason.BadModel
+                else -> null
+            }
+            return failureFor(code, payload, reason)
+        }
     }
 }

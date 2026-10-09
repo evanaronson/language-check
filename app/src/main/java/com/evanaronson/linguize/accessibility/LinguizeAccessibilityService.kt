@@ -83,7 +83,10 @@ class LinguizeAccessibilityService : AccessibilityService() {
         check.check(selection.text, entry.language, Origin.Button, field.packageName?.toString())
 
         val close: () -> Unit = {
-            check.workingText?.let { writeBack(field, selection, it) }
+            // Applied only if the text really went into the field. When it's copied instead,
+            // nothing reached the app, and history has no "copied" for the whole text.
+            val wrote = check.workingText?.let { writeBack(field, selection, it) } == true
+            check.dismiss(applied = wrote)
             window.remove()
             this.window = null
         }
@@ -137,8 +140,9 @@ class LinguizeAccessibilityService : AccessibilityService() {
     /**
      * Puts the corrected text back in place of the selection. If the field changed or
      * went away while the card was open, it isn't overwritten: the text is copied instead.
+     * Returns true when the text went into the field, false when it was copied.
      */
-    private fun writeBack(field: AccessibilityNodeInfo, selection: Selection, replacement: String) {
+    private fun writeBack(field: AccessibilityNodeInfo, selection: Selection, replacement: String): Boolean {
         val unchanged = field.refresh() && field.text?.toString() == selection.full
         val text = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, selection.with(replacement))
@@ -150,10 +154,11 @@ class LinguizeAccessibilityService : AccessibilityService() {
                 putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
             }
             field.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, cursorAt)
-        } else {
-            copyToClipboard(replacement)
-            val why = if (unchanged) "This app didn't accept the change" else "The text changed meanwhile"
-            Toast.makeText(this, "$why; the corrected text is copied instead", Toast.LENGTH_LONG).show()
+            return true
         }
+        copyToClipboard(replacement)
+        val why = if (unchanged) "This app didn't accept the change" else "The text changed meanwhile"
+        Toast.makeText(this, "$why; the corrected text is copied instead", Toast.LENGTH_LONG).show()
+        return false
     }
 }

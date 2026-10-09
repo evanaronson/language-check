@@ -1,11 +1,5 @@
 package com.evanaronson.linguize.ui.home
 
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.unit.dp
-
 /** The launcher activity's screens: few enough for a state and a back handler, no navigation library. */
 internal sealed interface Screen {
     data object Home : Screen
@@ -30,10 +24,4 @@ internal sealed interface Screen {
             else -> Home
         }
     }
-}
-
-/** Back to the previous screen, in the card's style ("‹  Back" on the understanding page). */
-@Composable
-internal fun BackButton(onBack: () -> Unit) {
-    TextButton(onClick = onBack, contentPadding = PaddingValues(horizontal = 4.dp)) { Text("‹  Back") }
 }

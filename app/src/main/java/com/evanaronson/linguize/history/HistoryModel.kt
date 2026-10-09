@@ -1,5 +1,7 @@
 package com.evanaronson.linguize.history
 
+import com.evanaronson.linguize.core.EditKind
+import com.evanaronson.linguize.core.Verdict
 import kotlinx.serialization.Serializable
 
 /*
@@ -7,14 +9,17 @@ import kotlinx.serialization.Serializable
  * upload as-is. Rows use client-made UUIDs, epoch-millisecond UTC timestamps, soft
  * deletion and a schema version, so rows from several devices can merge on a server
  * without translation. See docs/history-spec.md.
+ *
+ * Enums are kept as the lowercase tokens in [Stored], the same in the database and the
+ * export, and read leniently: see [Tokens].
  */
 
 /** Where a check was started. */
-@Serializable
+@Serializable(with = OriginSerializer::class)
 enum class Origin { Menu, Button, Tester }
 
 /** What became of one suggestion by the time its card closed. */
-@Serializable
+@Serializable(with = DecisionSerializer::class)
 enum class Decision {
     /** Applied in the final text. */
     Accepted,
@@ -36,7 +41,7 @@ enum class Decision {
 }
 
 /** How a session ended. */
-@Serializable
+@Serializable(with = OutcomeSerializer::class)
 enum class Outcome {
     /** Accepted changes went back to the app. */
     Applied,
@@ -79,7 +84,7 @@ data class SessionRecord(
     val finalText: String? = null,
     /** Null while open. */
     val outcome: Outcome? = null,
-    /** The settings in force: they change what gets suggested. */
+    /** The settings in force, as [Stored] tokens: they change what gets suggested. */
     val punctuation: String,
     val judgments: String,
     val provider: String,
@@ -91,7 +96,15 @@ data class SessionRecord(
     val attempts: List<Attempt> = emptyList(),
     /** What the text means, from the last successful attempt. */
     val meaning: String? = null,
+    /**
+     * What the last successful attempt found: ok (there's a review, maybe with nothing to
+     * suggest), unclear, or wrong_language. Null when no attempt succeeded.
+     */
+    val status: Verdict.Status? = null,
 ) {
+    /** What another check must match to show this one's verdict again. */
+    val reuseKey: ReuseKey get() = ReuseKey(textHash, requestedLanguage, punctuation, judgments, provider, model, promptHash)
+
     companion object {
         const val SCHEMA = 1
     }
@@ -108,6 +121,11 @@ data class Attempt(
     /** `CheckFailure.Reason` name, when the attempt failed. */
     val failure: String? = null,
     val failureDetail: String? = null,
+    /**
+     * The session whose kept verdict was shown again instead of asking the model; null
+     * when the model was asked.
+     */
+    val reusedFrom: String? = null,
 )
 
 @Serializable
@@ -125,8 +143,8 @@ data class SuggestionRecord(
     val deletedAt: Long? = null,
     /** Index into the session's attempts. */
     val attempt: Int,
-    /** `fix` or `natural`. */
-    val kind: String,
+    @Serializable(with = EditKindSerializer::class)
+    val kind: EditKind,
     /** Position in the session's text. */
     val start: Int,
     val end: Int,
@@ -137,19 +155,38 @@ data class SuggestionRecord(
     val decidedAt: Long,
 )
 
+/** Everything a check must share with an earlier one for the earlier verdict to be shown again. */
+data class ReuseKey(
+    val textHash: String,
+    val requestedLanguage: String?,
+    val punctuation: String,
+    val judgments: String,
+    val provider: String,
+    val model: String,
+    val promptHash: String,
+)
+
 /** A row in the Recent list. */
 data class SessionSummary(
     val id: String,
     val startedAt: Long,
     val origin: Origin,
     val hostApp: String?,
+    /** The start of the text checked, at most [TEXT_PREFIX] characters. */
     val text: String,
     val outcome: Outcome?,
     val fixes: Int,
     val rewordings: Int,
     /** Suggestions that ended Accepted. */
     val taken: Int,
-)
+    /** [SessionRecord.status]: what the last successful attempt found; null when none succeeded. */
+    val status: Verdict.Status? = null,
+) {
+    companion object {
+        /** How much of a session's text a Recent row carries. */
+        const val TEXT_PREFIX = 300
+    }
+}
 
 /** A session with its suggestions, for the detail view and export. */
 @Serializable

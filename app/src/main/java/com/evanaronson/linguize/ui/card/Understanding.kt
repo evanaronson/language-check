@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,10 +25,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.evanaronson.linguize.core.Assumption
 import com.evanaronson.linguize.core.Settled
+import com.evanaronson.linguize.ui.components.BackButton
 
 /**
  * The quiet line at the top of the card that leads to how the text was
@@ -46,17 +47,29 @@ internal fun UnderstandingEntry(meaning: String, assumptions: Int, onOpen: () ->
         Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.small)
-            .clickable(onClick = onOpen)
+            .clickable(onClickLabel = "Open", onClick = onOpen)
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // The glyphs only decorate the words, so screen readers skip them.
         Text(
-            "ⓘ  " + parts.joinToString(" · "),
+            "ⓘ  ",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clearAndSetSemantics {},
+        )
+        Text(
+            parts.joinToString(" · "),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
-        Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "›",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clearAndSetSemantics {},
+        )
     }
 }
 
@@ -78,7 +91,7 @@ internal fun UnderstandingPage(
     val open = assumptions.filterNot { a -> settled.any { it.about == a.about } }
     var changing by remember { mutableStateOf<String?>(null) }
 
-    TextButton(onClick = onBack, contentPadding = PaddingValues(horizontal = 4.dp)) { Text("‹  Back") }
+    BackButton(onBack)
     if (meaning.isNotBlank()) {
         Text("Meaning", style = MaterialTheme.typography.titleMedium)
         Text(

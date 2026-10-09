@@ -1,0 +1,73 @@
+package com.evanaronson.linguize.llm
+
+import com.evanaronson.linguize.core.Judgments
+import com.evanaronson.linguize.core.Punctuation
+import com.evanaronson.linguize.llm.CheckFailure.Reason
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class GeminiClientTest {
+    private val prompt = Prompt(system = "", schemaJson = "{}")
+    private val request = CheckRequest("Bon dia", null, Punctuation.Moderate, Judgments.Both)
+
+    @Test
+    fun geminiErrorsMapToWhatTheCardSays() {
+        val cases = listOf(
+            400 to """{"error":{"message":"API key not valid","status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}""" to Reason.BadKey,
+            403 to """{"error":{"message":"Permission denied"}}""" to Reason.BadKey,
+            403 to """{"error":{"message":"This model is not available to you"}}""" to Reason.BadModel,
+            400 to """{"error":{"message":"responseJsonSchema is not supported by this model"}}""" to Reason.BadModel,
+            404 to """{"error":{"message":"models/x is not found"}}""" to Reason.BadModel,
+            429 to """{"error":{"message":"Slow down"}}""" to Reason.RateLimited,
+        )
+        for ((call, expected) in cases) {
+            val (code, payload) = call
+            assertEquals("$code $payload", expected, GeminiClient.failure(code, payload).reason)
+        }
+    }
+
+    @Test
+    fun anAnswerCutOffAtTheTokenLimitIsTooLong() {
+        val payload = """{"candidates":[{"content":{"parts":[{"text":"{\"status\":\"ok\",\"mean"}]},"finishReason":"MAX_TOKENS"}]}"""
+        val failure = assertThrows(CheckFailure::class.java) { GeminiClient.answer(payload) }
+        assertEquals(Reason.TooLong, failure.reason)
+    }
+
+    @Test
+    fun thoughtsAreLeftOutOfTheAnswer() {
+        val payload = """{"candidates":[{"content":{"parts":[{"text":"hmm","thought":true},{"text":"{}"}]},"finishReason":"STOP"}]}"""
+        assertEquals("{}", GeminiClient.answer(payload))
+    }
+
+    @Test
+    fun aModelWithoutMinimalThinkingIsAskedAgainWithItsDefault() {
+        val http = FakeHttp { _, index ->
+            if (index == 0) 400 to """{"error":{"message":"Thinking level MINIMAL is not supported"}}"""
+            else 200 to answer(VERDICT_JSON)
+        }
+        val client = GeminiClient(http.client, prompt)
+        runBlocking { client.check("key", "gemini-x", request) }
+        assertEquals(2, http.requests.size)
+        assertTrue("thinkingConfig" in http.body(0))
+        assertFalse("thinkingConfig" in http.body(1))
+
+        // Remembered, so the next check goes straight to the default.
+        runBlocking { client.check("key", "gemini-x", request) }
+        assertFalse("thinkingConfig" in http.body(2))
+    }
+
+    @Test
+    fun theOutputLimitIsSent() {
+        val http = FakeHttp { _, _ -> 200 to answer(VERDICT_JSON) }
+        runBlocking { GeminiClient(http.client, prompt).check("key", "gemini-x", request) }
+        assertTrue("\"maxOutputTokens\":${Prompt.MAX_OUTPUT_TOKENS}" in http.body(0))
+    }
+
+    private fun answer(text: String) =
+        """{"candidates":[{"content":{"parts":[{"text":${JsonPrimitive(text)}}]},"finishReason":"STOP"}]}"""
+}

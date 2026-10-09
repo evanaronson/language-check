@@ -47,6 +47,18 @@ class CardActions(
             onOpenSettings = onOpenSettings,
             onSettle = check::settle,
         )
+
+        /**
+         * For a card that's only read, like a past check: Copy copies and nothing else does
+         * anything. No check behind it, so it can't reach the model or history.
+         */
+        fun readOnly(context: Context) = CardActions(
+            onCopy = { text, _ -> context.copyToClipboard(text) },
+            review = null,
+            onRetry = {},
+            onOpenSettings = null,
+            onSettle = { _, _ -> },
+        )
     }
 }
 

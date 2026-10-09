@@ -4,6 +4,7 @@ import android.app.Application
 import com.evanaronson.linguize.data.ApiKeys
 import com.evanaronson.linguize.data.SelectionMenu
 import com.evanaronson.linguize.data.Settings
+import com.evanaronson.linguize.history.HistoryEnvironment
 import com.evanaronson.linguize.history.HistoryStore
 import com.evanaronson.linguize.history.SqliteHistoryStore
 import com.evanaronson.linguize.llm.GeminiClient
@@ -26,6 +27,17 @@ class App : Application() {
 
     /** Every check and what came of it. Opens its database on first use, off the main thread. */
     val history: HistoryStore by lazy { SqliteHistoryStore(this) }
+
+    /** This build's version name. */
+    @Suppress("DEPRECATION") // The PackageInfoFlags overload needs API 33.
+    val appVersion: String by lazy { packageManager.getPackageInfo(packageName, 0).versionName.orEmpty() }
+
+    /** What history reads from the app. [onCreate] warms it up, so reading it on a check is cheap. */
+    val historyEnvironment = object : HistoryEnvironment {
+        override val enabled get() = settings.historyEnabled
+        override val deviceId get() = settings.deviceId
+        override val appVersion get() = this@App.appVersion
+    }
 
     /**
      * Lives as long as the process. For writes that must outlive a screen, like recording a
@@ -64,7 +76,12 @@ class App : Application() {
         // onCreate runs once per process, so this does too. A session still open now was
         // open when the last process ended; ones started from now on belong to this one.
         val started = System.currentTimeMillis()
-        // Housekeeping: if the database can't be opened, the next write will say so; don't crash at start.
-        appScope.launch { runCatching { history.markAbandoned(started) } }
+        appScope.launch {
+            // Made (and committed) once, here, rather than racing on the first checks.
+            runCatching { settings.deviceId }
+            runCatching { appVersion }
+            // Housekeeping; the store logs its own failures and never throws.
+            history.markAbandoned(started)
+        }
     }
 }

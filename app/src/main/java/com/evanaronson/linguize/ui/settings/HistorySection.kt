@@ -3,7 +3,6 @@ package com.evanaronson.linguize.ui.settings
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +14,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,7 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.evanaronson.linguize.ui.components.SectionTitle
-import com.evanaronson.linguize.ui.history.shortDate
+import com.evanaronson.linguize.ui.components.shortDate
 
 /** Whether checks are remembered, how many are, and Clear and Export. Browsing them is on Home. */
 @Composable
@@ -49,8 +49,16 @@ internal fun HistorySection(state: SettingsState, settings: SettingsViewModel) {
         TextButton(enabled = count > 0, onClick = { confirmingClear = true }) { Text("Clear") }
         TextButton(
             enabled = count > 0 && !settings.exporting,
-            onClick = { settings.exportHistory { uri -> share(context, uri) } },
+            onClick = settings::exportHistory,
         ) { Text("Export") }
+    }
+
+    // Offered from this composition, so from the activity on screen now.
+    val exported = settings.exported
+    LaunchedEffect(exported) {
+        if (exported == null) return@LaunchedEffect
+        settings.exportOffered()
+        share(context, exported)
     }
 
     if (confirmingClear) {
@@ -92,10 +100,13 @@ private fun keptLabel(kept: KeptHistory): String {
 private fun checks(count: Int) = if (count == 1) "1 check" else "$count checks"
 
 /** Offers the exported file through the share sheet. */
-private fun share(context: Context, uri: Uri?) {
-    if (uri == null) {
-        Toast.makeText(context, "Couldn't export history", Toast.LENGTH_SHORT).show()
-        return
+private fun share(context: Context, exported: Export) {
+    val uri = when (exported) {
+        is Export.Ready -> exported.uri
+        Export.Failed -> {
+            Toast.makeText(context, "Couldn't export history", Toast.LENGTH_SHORT).show()
+            return
+        }
     }
     val send = Intent(Intent.ACTION_SEND)
         .setType("text/plain")

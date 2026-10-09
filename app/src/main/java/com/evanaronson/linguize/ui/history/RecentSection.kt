@@ -28,7 +28,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,7 +39,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.evanaronson.linguize.history.Outcome
 import com.evanaronson.linguize.ui.components.SectionTitle
-import kotlinx.coroutines.launch
 import java.time.format.DateTimeFormatter
 
 /**
@@ -56,22 +54,22 @@ fun RecentSection(
     onOpenSettings: () -> Unit,
 ) {
     val rows by history.recent.collectAsState()
-    val scope = rememberCoroutineScope()
+    val pending by history.pendingDelete.collectAsState()
     val time = rememberTimeFormat()
 
-    // Gone from the list at once; deleted for good when the snackbar goes without Undo,
-    // or when the screen closes first.
-    fun delete(id: String) {
-        history.hide(id)
-        scope.launch {
-            snackbar.currentSnackbarData?.dismiss()
-            var undone = false
-            try {
-                undone = snackbar.showSnackbar("Check deleted", actionLabel = "Undo", duration = SnackbarDuration.Short) ==
-                    SnackbarResult.ActionPerformed
-            } finally {
-                if (undone) history.restore(id) else history.delete(id)
-            }
+    // Undo for the row just deleted. The deletion itself waits in the view model: here it's
+    // committed only when the snackbar goes unanswered. If the snackbar is torn down instead
+    // (rotation, dark mode, another screen), the view model gives it a moment to come back.
+    LaunchedEffect(pending) {
+        val id = pending ?: return@LaunchedEffect
+        history.undoShown(id)
+        var answered = false
+        try {
+            val result = snackbar.showSnackbar("Check deleted", actionLabel = "Undo", duration = SnackbarDuration.Short)
+            answered = true
+            if (result == SnackbarResult.ActionPerformed) history.undoDelete(id) else history.commitDelete(id)
+        } finally {
+            if (!answered) history.undoHidden(id)
         }
     }
 
@@ -87,8 +85,9 @@ fun RecentSection(
         shown.forEachIndexed { index, row ->
             key(row.summary.id) {
                 if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                SwipeToDelete(onDelete = { delete(row.summary.id) }) {
-                    SessionRow(row, now, time, onClick = { onOpen(row.summary.id) })
+                val delete = { history.delete(row.summary.id) }
+                SwipeToDelete(onDelete = delete) {
+                    SessionRow(row, now, time, onClick = { onOpen(row.summary.id) }, onDelete = delete)
                 }
             }
         }
@@ -96,14 +95,23 @@ fun RecentSection(
 }
 
 @Composable
-private fun SessionRow(row: RecentRow, now: Long, time: DateTimeFormatter, onClick: () -> Unit) {
+private fun SessionRow(row: RecentRow, now: Long, time: DateTimeFormatter, onClick: () -> Unit, onDelete: () -> Unit) {
     val summary = row.summary
     Column(
         Modifier
             .fillMaxWidth()
             // Opaque, so the delete background shows only while swiping.
             .background(MaterialTheme.colorScheme.surface)
-            .clickable(onClick = onClick)
+            // On the same node as the click, so screen readers offer Delete on the row they're on.
+            .semantics {
+                customActions = listOf(
+                    CustomAccessibilityAction("Delete") {
+                        onDelete()
+                        true
+                    },
+                )
+            }
+            .clickable(onClickLabel = "Open", onClick = onClick)
             .padding(vertical = 12.dp),
     ) {
         Text(
@@ -114,14 +122,14 @@ private fun SessionRow(row: RecentRow, now: Long, time: DateTimeFormatter, onCli
         Spacer(Modifier.height(2.dp))
         Text(firstLine(summary.text), style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(
-            summary.status,
+            summary.statusLine,
             style = MaterialTheme.typography.bodySmall,
             color = if (summary.outcome == Outcome.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
-/** Swipe toward the start to delete; screen readers get a Delete action instead. */
+/** Swipe toward the start to delete; screen readers get the row's Delete action instead (see [SessionRow]). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SwipeToDelete(onDelete: () -> Unit, content: @Composable () -> Unit) {
@@ -142,14 +150,6 @@ private fun SwipeToDelete(onDelete: () -> Unit, content: @Composable () -> Unit)
             ) {
                 Text("Delete", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onErrorContainer)
             }
-        },
-        modifier = Modifier.semantics {
-            customActions = listOf(
-                CustomAccessibilityAction("Delete") {
-                    delete()
-                    true
-                },
-            )
         },
         enableDismissFromStartToEnd = false,
     ) {

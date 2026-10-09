@@ -17,23 +17,23 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.evanaronson.linguize.core.CheckResult
 import com.evanaronson.linguize.history.Origin
 import com.evanaronson.linguize.history.Outcome
 import com.evanaronson.linguize.history.SessionRecord
 import com.evanaronson.linguize.ui.card.CardActions
 import com.evanaronson.linguize.ui.card.CardState
-import com.evanaronson.linguize.ui.card.CheckViewModel
 import com.evanaronson.linguize.ui.card.ResultCard
 import com.evanaronson.linguize.ui.card.title
-import com.evanaronson.linguize.ui.home.BackButton
+import com.evanaronson.linguize.ui.components.BackButton
+import com.evanaronson.linguize.ui.components.shortDate
 import java.time.Instant
 import java.time.ZoneId
 
@@ -56,7 +56,6 @@ fun SessionScreen(session: SessionViewModel, onBack: () -> Unit) {
             SessionPage.Missing -> Faint("This check is no longer kept.")
             is SessionPage.Shown -> Shown(
                 page,
-                onBack = onBack,
                 onDelete = {
                     session.delete()
                     onBack()
@@ -67,7 +66,7 @@ fun SessionScreen(session: SessionViewModel, onBack: () -> Unit) {
 }
 
 @Composable
-private fun Shown(page: SessionPage.Shown, onBack: () -> Unit, onDelete: () -> Unit) {
+private fun Shown(page: SessionPage.Shown, onDelete: () -> Unit) {
     val session = page.session
     Header(session, page.appLabel)
 
@@ -76,7 +75,7 @@ private fun Shown(page: SessionPage.Shown, onBack: () -> Unit, onDelete: () -> U
     val cardShowsText = (card?.result as? CheckResult.Reviewed)?.looksGood == false
     if (!cardShowsText) TextBlock("Checked", session.text)
     if (card != null) {
-        ReadOnlyCard(card, onBack)
+        ReadOnlyCard(card)
     } else {
         Text(
             page.failure?.let { "Couldn't check · ${it.title}" } ?: "Couldn't check",
@@ -101,16 +100,16 @@ private fun Header(session: SessionRecord, appLabel: String?) {
 
 /**
  * The card's own content, with nothing to act on: no Replace, and assumptions can't be
- * changed. The card's buttons need a check to call; this one is never started, so
- * Copy can't touch the check on Home.
+ * changed. Copy only copies; no check stands behind the card, so it can't reach the
+ * model or history.
  */
 @Composable
-private fun ReadOnlyCard(card: CardState.Done, onBack: () -> Unit) {
+private fun ReadOnlyCard(card: CardState.Done) {
     val context = LocalContext.current
-    val idle = viewModel<CheckViewModel>(key = "history")
+    val actions = remember(context) { CardActions.readOnly(context) }
     ResultCard(
         state = card,
-        actions = CardActions.of(idle, context, onClose = onBack, onOpenSettings = null, canReplace = false),
+        actions = actions,
         modifier = Modifier.fillMaxWidth(),
         scrollable = false,
     )

@@ -5,6 +5,8 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.database.sqlite.SQLiteStatement
+import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,22 +25,34 @@ import java.io.OutputStream
  * first call, on [Dispatchers.IO] like every other. The observed queries re-run after any
  * write made through this store.
  *
+ * Nothing throws but cancellation: a failure (the database can't be opened or upgraded,
+ * a write fails, a row can't be read) is logged and answered with nothing.
+ *
  * Deleting is a hard delete for now. The rows have `deletedAt` so a deletion can travel
  * once there's a sync; until then there's nothing to carry it, and the writer asked for
  * the text to be gone.
  */
-class SqliteHistoryStore(context: Context) : HistoryStore {
+class SqliteHistoryStore(
+    context: Context,
+    name: String = HistorySchema.NAME,
+    clock: () -> Long = System::currentTimeMillis,
+) : HistoryStore {
     private val context = context.applicationContext
-    private val helper = Helper(this.context)
+    private val name = name
+    private val helper = Helper(this.context, name)
+
+    /** Sessions cleared or deleted in this process, which an open card mustn't write back. */
+    private val forgotten = Forgotten(clock)
 
     /** Bumped after every write, so the observed queries run again. */
     private val changes = MutableStateFlow(0L)
 
-    override suspend fun save(session: SessionRecord) = write { db ->
-        db.execute(HistorySchema.SAVE_SESSION, session.values().values)
+    override suspend fun save(session: SessionRecord) = write("save a session") { db ->
+        if (forgotten.allows(session)) db.execute(HistorySchema.SAVE_SESSION, session.values().values)
     }
 
-    override suspend fun close(session: SessionRecord, suggestions: List<SuggestionRecord>) = write { db ->
+    override suspend fun close(session: SessionRecord, suggestions: List<SuggestionRecord>) = write("close a session") { db ->
+        if (!forgotten.allows(session)) return@write
         db.execute(HistorySchema.CLOSE_SESSION, session.values().values)
         // Closing twice writes the same rows again rather than adding to them.
         db.execute(HistorySchema.DELETE_SUGGESTIONS_OF, listOf(session.id))
@@ -60,56 +74,43 @@ class SqliteHistoryStore(context: Context) : HistoryStore {
      * database when there isn't one yet: then there's nothing to mark.
      */
     override suspend fun markAbandoned(now: Long) {
-        val exists = withContext(Dispatchers.IO) { context.getDatabasePath(HistorySchema.NAME).exists() }
+        val exists = withContext(Dispatchers.IO) { context.getDatabasePath(name).exists() }
         if (!exists) return
-        write { db -> db.execute(HistorySchema.MARK_ABANDONED, listOf(now, now, now)) }
+        write("mark abandoned sessions") { db -> db.execute(HistorySchema.MARK_ABANDONED, listOf(now, now, now)) }
     }
 
-    override fun count(): Flow<Int> = observe { db ->
+    override fun count(): Flow<Int> = observe("count sessions", 0) { db ->
         db.select(HistorySchema.COUNT) { it.long("n").toInt() }.single()
     }
 
-    override fun since(): Flow<Long?> = observe { db ->
+    override fun since(): Flow<Long?> = observe("read the oldest session", null) { db ->
         db.select(HistorySchema.SINCE) { it.longOrNull("since") }.single()
     }
 
-    override fun recent(limit: Int): Flow<List<SessionSummary>> = observe { db ->
+    override fun recent(limit: Int): Flow<List<SessionSummary>> = observe("read recent sessions", emptyList()) { db ->
         db.select(HistorySchema.recent(limit), read = ::sessionSummary)
     }
 
-    override suspend fun detail(id: String): SessionDetail? = withContext(Dispatchers.IO) {
-        helper.writableDatabase.detail(id)
-    }
+    override suspend fun detail(id: String): SessionDetail? = read("read a session", null) { db -> db.detail(id) }
 
-    override suspend fun reusable(
-        textHash: String,
-        requestedLanguage: String?,
-        punctuation: String,
-        judgments: String,
-        provider: String,
-        model: String,
-        promptHash: String,
-        since: Long,
-    ): SessionRecord? = withContext(Dispatchers.IO) {
-        val args = listOfNotNull(textHash, requestedLanguage, punctuation, judgments, provider, model, promptHash) +
-            since.toString()
-        helper.writableDatabase
-            .select(HistorySchema.reusable(requestedLanguage), args, ::sessionRecord)
+    override suspend fun reusable(key: ReuseKey, since: Long): SessionRecord? = read("look for a kept answer", null) { db ->
+        db.select(HistorySchema.reusable(key.requestedLanguage), HistorySchema.reusableArgs(key, since), ::sessionRecord)
             .firstOrNull { it.lastAttemptSucceeded() }
     }
 
     /** Removes the session and, by cascade, its suggestions. */
-    override suspend fun delete(id: String) = write { db ->
+    override suspend fun delete(id: String) = write("delete a session") { db ->
+        forgotten.deleted(id)
         db.execute(HistorySchema.DELETE_SESSION, listOf(id))
     }
 
-    override suspend fun clear() = write { db ->
+    override suspend fun clear() = write("clear history") { db ->
+        forgotten.cleared()
         HistorySchema.CLEAR.forEach(db::execSQL)
     }
 
     /** Oldest first. Leaves [out] open; the caller closes it. */
-    override suspend fun export(out: OutputStream) = withContext(Dispatchers.IO) {
-        val db = helper.writableDatabase
+    override suspend fun export(out: OutputStream): Boolean = read("export history", false) { db ->
         val writer = out.bufferedWriter()
         // One transaction, so a delete during the export can't split a session from its suggestions.
         db.beginTransaction()
@@ -124,6 +125,7 @@ class SqliteHistoryStore(context: Context) : HistoryStore {
             db.endTransaction()
         }
         writer.flush()
+        true
     }
 
     private fun SQLiteDatabase.detail(id: String): SessionDetail? {
@@ -131,13 +133,13 @@ class SqliteHistoryStore(context: Context) : HistoryStore {
         return SessionDetail(session, suggestions(id))
     }
 
+    /** A session's suggestions, leaving out any this build can't read. */
     private fun SQLiteDatabase.suggestions(sessionId: String) =
-        select(HistorySchema.SESSION_SUGGESTIONS, listOf(sessionId), ::suggestionRecord)
+        select(HistorySchema.SESSION_SUGGESTIONS, listOf(sessionId), ::suggestionRecord).filterNotNull()
 
-    /** Runs [block] in a transaction on [Dispatchers.IO], then tells the observed queries. */
-    private suspend fun write(block: (SQLiteDatabase) -> Unit) {
-        withContext(Dispatchers.IO) {
-            val db = helper.writableDatabase
+    /** Runs [block] in a transaction on [Dispatchers.IO], then tells the observed queries. Logs a failure. */
+    private suspend fun write(what: String, block: (SQLiteDatabase) -> Unit) {
+        val written = read(what, false) { db ->
             db.beginTransaction()
             try {
                 block(db)
@@ -145,18 +147,24 @@ class SqliteHistoryStore(context: Context) : HistoryStore {
             } finally {
                 db.endTransaction()
             }
+            true
         }
-        changes.update { it + 1 }
+        if (written) changes.update { it + 1 }
     }
 
-    /** [read] now and again after every write, on [Dispatchers.IO]. */
-    private fun <T> observe(read: (SQLiteDatabase) -> T): Flow<T> = changes
-        .map { read(helper.writableDatabase) }
+    /** [block] on [Dispatchers.IO] with the database; [fallback] when it fails. */
+    private suspend fun <T> read(what: String, fallback: T, block: (SQLiteDatabase) -> T): T = withContext(Dispatchers.IO) {
+        guarded(what, fallback) { block(helper.writableDatabase) }
+    }
+
+    /** [read] now and again after every write, on [Dispatchers.IO]; [fallback] when it fails. */
+    private fun <T> observe(what: String, fallback: T, read: (SQLiteDatabase) -> T): Flow<T> = changes
+        .map { guarded(what, fallback) { read(helper.writableDatabase) } }
         .flowOn(Dispatchers.IO)
         .distinctUntilChanged()
 
-    private class Helper(context: Context) :
-        SQLiteOpenHelper(context, HistorySchema.NAME, null, HistorySchema.VERSION) {
+    private class Helper(context: Context, name: String) :
+        SQLiteOpenHelper(context, name, null, HistorySchema.VERSION) {
         init {
             // Lets the observed queries read while a close is being written.
             setWriteAheadLoggingEnabled(true)
@@ -172,12 +180,25 @@ class SqliteHistoryStore(context: Context) : HistoryStore {
 
         /**
          * There's only version 1. Whoever makes version 2 writes the migration here; until
-         * then, failing loudly beats opening a database whose shape the queries don't know.
+         * then, refusing to open (which every call logs and survives) beats reading a
+         * database whose shape the queries don't know.
          */
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
             error("No migration for history from version $oldVersion to $newVersion")
         }
     }
+}
+
+private const val TAG = "History"
+
+/** History must never break the app: anything but cancellation is logged and gives [fallback]. */
+private inline fun <T> guarded(what: String, fallback: T, block: () -> T): T = try {
+    block()
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Exception) {
+    Log.w(TAG, "Couldn't $what", e)
+    fallback
 }
 
 private class CursorRow(private val cursor: Cursor) : Row {

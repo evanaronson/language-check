@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.evanaronson.linguize.App
+import com.evanaronson.linguize.core.CheckResult
 import com.evanaronson.linguize.history.SessionDetail
 import com.evanaronson.linguize.history.SessionRecord
 import com.evanaronson.linguize.llm.CheckFailure
@@ -51,7 +52,19 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
         job?.cancel()
         job = viewModelScope.launch {
             val detail = app.history.detail(id)
-            page = if (detail == null) SessionPage.Missing else withContext(Dispatchers.IO) { shown(detail) }
+            page = if (detail == null) {
+                SessionPage.Missing
+            } else {
+                // Creating the checker reads its prompt from assets, so not on the main thread.
+                withContext(Dispatchers.IO) {
+                    val result = try {
+                        app.checker.replay(detail.session, detail.suggestions)
+                    } catch (_: CheckFailure) {
+                        null
+                    }
+                    shown(detail, result)
+                }
+            }
         }
     }
 
@@ -62,10 +75,11 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
         app.appScope.launch { app.history.delete(id) }
     }
 
-    private fun shown(detail: SessionDetail): SessionPage.Shown {
+    /** [result] is the last successful answer as `Checker.replay` rebuilt it; null when there's none to show. */
+    private fun shown(detail: SessionDetail, result: CheckResult?): SessionPage.Shown {
         val session = detail.session
         val failure = session.attempts.lastOrNull()?.failure
             ?.let { name -> CheckFailure.Reason.entries.firstOrNull { it.name == name } }
-        return SessionPage.Shown(session, labels.of(session.hostApp), rebuild(detail), failure)
+        return SessionPage.Shown(session, labels.of(session.hostApp), result?.let { readOnlyCard(session, it) }, failure)
     }
 }

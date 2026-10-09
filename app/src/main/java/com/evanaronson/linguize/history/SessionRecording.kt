@@ -4,9 +4,10 @@ import com.evanaronson.linguize.core.Edit
 import com.evanaronson.linguize.core.EditKind
 import com.evanaronson.linguize.core.Revision
 import com.evanaronson.linguize.core.Settled
+import com.evanaronson.linguize.core.Verdict
 import java.security.MessageDigest
 
-/** Facts about a session known when it starts. */
+/** Facts about a session known when it starts. Settings are [Stored] tokens. */
 data class SessionContext(
     val origin: Origin,
     val hostApp: String?,
@@ -28,11 +29,14 @@ data class SessionContext(
  * every change to the revision the writer makes (accept, accept all, undo), copies,
  * and finally the close. See docs/history-spec.md, "Decisions, defined".
  *
- * Only the current attempt's suggestions are decided at the close; an earlier attempt's
- * are [Decision.Superseded] as soon as the next attempt replaces them. What was accepted
- * and what was copied is tracked per attempt, since a re-check carries identical accepted
- * edits over as new edits ([Revision.acceptMatching]). Once closed, further reports are
- * ignored.
+ * The suggestions decided at the close are those of the *decided revision*: the last
+ * one an attempt offered. An attempt that offers none (it failed, or found the text
+ * unclear) leaves the previous revision decided, because the card keeps that revision's
+ * accepted changes and applies them if the writer replaces the text; only an attempt
+ * with a revision of its own makes the previous one's suggestions [Decision.Superseded].
+ * What was accepted and what was copied is tracked per revision, since a re-check carries
+ * identical accepted edits over as new edits ([Revision.acceptMatching]). Once closed,
+ * further reports are ignored.
  */
 class SessionRecording(
     text: String,
@@ -44,16 +48,19 @@ class SessionRecording(
     var session: SessionRecord
         private set
 
-    /** Rows for earlier attempts' suggestions, already decided. */
+    /** Rows for earlier revisions' suggestions, already decided. */
     private val superseded = mutableListOf<Pending>()
 
-    /** What the current attempt offers; null before the first attempt or after a failed one. */
+    /** What the card offers; null before the first attempt that offered something. */
     private var revision: Revision? = null
 
-    /** Edits of the current attempt accepted at some point, including ones carried over. */
+    /** The index of the attempt [revision] came from. */
+    private var revisionAttempt = -1
+
+    /** Edits of [revision] accepted at some point, including ones carried over. */
     private val everAccepted = mutableSetOf<Int>()
 
-    /** Edits of the current attempt that were on offer when their section was copied. */
+    /** Edits of [revision] that were in a section's version when it was copied. */
     private val copiedEdits = mutableSetOf<Int>()
 
     /** Kinds copied at any point in the session, for the outcome. */
@@ -84,8 +91,10 @@ class SessionRecording(
 
     /**
      * An attempt finished. [revision] is what the card now offers (null when the attempt
-     * failed or the result has nothing to review); the previous attempt's suggestions,
-     * if any were shown, become [Decision.Superseded]. Returns the session to save.
+     * failed or the result has nothing to review); when there is one, the previous
+     * revision's suggestions become [Decision.Superseded]. [status] is what a successful
+     * attempt found. [reusedFrom] is the session whose kept verdict was shown instead of
+     * asking the model. Returns the session to save.
      */
     fun attempt(
         at: Long,
@@ -95,37 +104,50 @@ class SessionRecording(
         failureDetail: String?,
         revision: Revision?,
         meaning: String?,
+        status: Verdict.Status? = null,
+        reusedFrom: String? = null,
     ): SessionRecord {
         if (closed != null) return session
-        this.revision?.let { previous ->
-            val index = session.attempts.lastIndex
-            previous.edits.forEach { superseded += Pending(index, it, Decision.Superseded, at) }
+        val index = session.attempts.size
+        if (revision != null) {
+            this.revision?.let { previous ->
+                previous.edits.forEach { superseded += Pending(revisionAttempt, it, Decision.Superseded, at) }
+            }
+            this.revision = revision
+            revisionAttempt = index
+            everAccepted.clear()
+            copiedEdits.clear()
+            remember(revision)
         }
-        this.revision = revision
-        everAccepted.clear()
-        copiedEdits.clear()
-        revision?.let { remember(it) }
-        val attempt = Attempt(at, settled.map { SettledAnswer(it.about, it.answer) }, verdict, failure, failureDetail)
+        val attempt = Attempt(at, settled.map { SettledAnswer(it.about, it.answer) }, verdict, failure, failureDetail, reusedFrom)
+        val succeeded = failure == null
         session = session.copy(
             updatedAt = maxOf(session.updatedAt, at),
             attempts = session.attempts + attempt,
-            meaning = if (failure == null) meaning else session.meaning,
+            meaning = if (succeeded) meaning else session.meaning,
+            status = if (succeeded) status ?: session.status else session.status,
         )
         return session
     }
 
-    /** The writer accepted or undid something; [revision] is the new state. */
+    /** The writer accepted or undid something; [revision] is the new state. Ignored before any attempt offered one. */
     fun changed(revision: Revision) {
-        if (closed != null) return
+        if (closed != null || this.revision == null) return
         this.revision = revision
         remember(revision)
     }
 
-    /** The writer copied the version shown for [kind]. */
+    /**
+     * The writer copied the version shown for [kind]: the accepted changes that show in
+     * the text, and [kind]'s remaining suggestions.
+     */
     fun copied(kind: EditKind) {
         if (closed != null) return
         copiedKinds += kind
-        revision?.let { copiedEdits += it.remaining(kind).map { edit -> edit.id } }
+        revision?.let { revision ->
+            copiedEdits += revision.edits.filter { revision.isApplied(it.id) }.map { it.id }
+            copiedEdits += revision.remaining(kind).map { it.id }
+        }
     }
 
     /**
@@ -135,14 +157,16 @@ class SessionRecording(
      */
     fun close(at: Long, finalText: String?): SessionDetail {
         closed?.let { return it }
-        val index = session.attempts.lastIndex
-        val current = revision?.let { revision -> revision.edits.map { Pending(index, it, decide(revision, it), at) } }.orEmpty()
+        val applied = finalText != null
+        val current = revision?.let { revision ->
+            revision.edits.map { Pending(revisionAttempt, it, decide(revision, it, applied), at) }
+        }.orEmpty()
         session = session.copy(
             updatedAt = maxOf(session.updatedAt, at),
             closedAt = at,
             finalText = finalText,
             outcome = when {
-                finalText != null -> Outcome.Applied
+                applied -> Outcome.Applied
                 copiedKinds.isNotEmpty() -> Outcome.Copied
                 session.attempts.lastOrNull()?.failure != null -> Outcome.Failed
                 else -> Outcome.None
@@ -156,14 +180,31 @@ class SessionRecording(
         everAccepted += revision.acceptedEdits.map { it.id }
     }
 
-    /** The decision for one of the current attempt's edits, as things stand at the close. */
-    private fun decide(revision: Revision, edit: Edit) = when {
-        revision.isApplied(edit.id) -> Decision.Accepted
-        revision.isRetired(edit.id) -> Decision.Retired
-        edit.id in copiedEdits -> Decision.Copied
-        edit.id in everAccepted -> Decision.Undone
-        else -> Decision.Ignored
+    /**
+     * The decision for one of the decided revision's edits, as things stand at the close.
+     * When nothing went back to the app ([applied] false), nothing is accepted: what was
+     * accepted ends copied (it left in a copy) or undone.
+     */
+    private fun decide(revision: Revision, edit: Edit, applied: Boolean): Decision = if (applied) {
+        when {
+            revision.isApplied(edit.id) -> Decision.Accepted
+            revision.isRetired(edit.id) -> Decision.Retired
+            edit.id in copiedEdits -> Decision.Copied
+            edit.id in everAccepted -> Decision.Undone
+            else -> Decision.Ignored
+        }
+    } else {
+        when {
+            edit.id in copiedEdits -> Decision.Copied
+            // A fix inside an accepted rewording that was copied left with the rewording.
+            revision.isRetired(edit.id) && retiredByCopied(revision, edit) -> Decision.Retired
+            edit.id in everAccepted -> Decision.Undone
+            else -> Decision.Ignored
+        }
     }
+
+    private fun retiredByCopied(revision: Revision, fix: Edit) =
+        revision.acceptedEdits.any { it.kind == EditKind.Natural && it.id in copiedEdits && it.touches(fix) }
 
     /** A suggestion whose decision is known, waiting for the close to become a row. */
     private inner class Pending(val attempt: Int, val edit: Edit, val decision: Decision, val decidedAt: Long) {
@@ -174,7 +215,7 @@ class SessionRecording(
             createdAt = at,
             updatedAt = at,
             attempt = attempt,
-            kind = edit.kind.name.lowercase(),
+            kind = edit.kind,
             start = edit.start,
             end = edit.end,
             fromText = edit.from,
