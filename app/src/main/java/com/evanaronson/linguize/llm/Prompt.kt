@@ -9,6 +9,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import java.security.MessageDigest
 
 /**
  * The contract with the model: instructions, answer schema, the user message
@@ -18,6 +19,12 @@ import kotlinx.serialization.json.jsonObject
 class Prompt(val system: String, schemaJson: String) {
     /** The answer format, as JSON Schema. */
     val schema: JsonObject = json.parseToJsonElement(schemaJson).jsonObject
+
+    /** Short hash of the instructions and schema, so verdicts from different prompts aren't compared as if equal. */
+    val hash: String = MessageDigest.getInstance("SHA-256")
+        .digest("$system\u0000$schemaJson".toByteArray())
+        .take(6)
+        .joinToString("") { "%02x".format(it) }
 
     /** The setting lines check_prompt.md describes, then the text. */
     fun userMessage(request: CheckRequest) = buildString {
@@ -41,6 +48,12 @@ class Prompt(val system: String, schemaJson: String) {
         }
     }
 
+    /**
+     * [verdict] as JSON, every field included, for keeping in history. It reads back with
+     * [parseVerdict]; fields the app doesn't know yet were already dropped when it was read.
+     */
+    fun verdictJson(verdict: Verdict): String = json.encodeToString(Verdict.serializer(), verdict)
+
     private fun token(punctuation: Punctuation) = when (punctuation) {
         Punctuation.Strict -> "strict"
         Punctuation.Moderate -> "moderate"
@@ -54,7 +67,10 @@ class Prompt(val system: String, schemaJson: String) {
     }
 
     companion object {
-        private val json = Json { ignoreUnknownKeys = true }
+        private val json = Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+        }
 
         fun load(context: Context) = Prompt(
             system = context.assets.open("check_prompt.md").bufferedReader().use { it.readText() },

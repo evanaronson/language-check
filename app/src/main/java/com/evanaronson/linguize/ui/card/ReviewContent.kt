@@ -96,7 +96,7 @@ private fun Suggestions(result: CheckResult.Reviewed, actions: CardActions) {
 }
 
 @Composable
-private fun EditSection(kind: EditKind, revision: Revision, onCopy: (String) -> Unit, review: ReviewActions?) {
+private fun EditSection(kind: EditKind, revision: Revision, onCopy: (String, EditKind) -> Unit, review: ReviewActions?) {
     val fix = kind == EditKind.Fix
     val remaining = revision.remaining(kind)
     when {
@@ -118,7 +118,7 @@ private fun EditSection(kind: EditKind, revision: Revision, onCopy: (String) -> 
             HighlightedText(preview.text, highlights, accent, review?.onAccept)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onCopy(preview.text) }) { Text("Copy") }
+                OutlinedButton(onClick = { onCopy(preview.text, kind) }) { Text("Copy") }
                 if (review != null) {
                     FilledTonalButton(onClick = { review.onAcceptAll(kind) }) { Text("Replace all") }
                 }

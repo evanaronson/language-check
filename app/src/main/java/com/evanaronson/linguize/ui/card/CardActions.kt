@@ -6,7 +6,8 @@ import com.evanaronson.linguize.ui.copyToClipboard
 
 /** What the card's buttons do; supplied by the screen hosting it. */
 class CardActions(
-    val onCopy: (String) -> Unit,
+    /** Copies the version shown for a kind: its text, and which kind it was. */
+    val onCopy: (text: String, kind: EditKind) -> Unit,
     /** Null when the selected text can't be replaced; the card then offers only Copy. */
     val review: ReviewActions?,
     val onRetry: () -> Unit,
@@ -27,8 +28,9 @@ class CardActions(
             onOpenSettings: (() -> Unit)?,
             canReplace: Boolean = true,
         ) = CardActions(
-            onCopy = { text ->
+            onCopy = { text, kind ->
                 context.copyToClipboard(text)
+                check.copied(kind)
                 onClose()
             },
             review = if (canReplace) {
