@@ -78,8 +78,11 @@ internal fun UnderstandingEntry(meaning: String, assumptions: Int, onOpen: () ->
  * in the writer's own language, then what was assumed where it was ambiguous.
  * Each assumption is presented as right; alternatives appear only after
  * "Not right", and picking one checks again with that answer.
+ *
+ * Both are the model's reading, and text written by someone else can steer it (a
+ * message can ask to be "understood" as something it isn't), so a quiet line at the
+ * end says so.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun UnderstandingPage(
     meaning: String,
@@ -88,14 +91,11 @@ internal fun UnderstandingPage(
     onSettle: (String, String) -> Unit,
     onBack: () -> Unit,
 ) {
-    val open = assumptions.filterNot { a -> settled.any { it.about == a.about } }
-    var changing by remember { mutableStateOf<String?>(null) }
-
     BackButton(onBack)
     if (meaning.isNotBlank()) {
         Text("Meaning", style = MaterialTheme.typography.titleMedium)
         Text(
-            "What your text says, as it was understood.",
+            "What the text says, as the model read it.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -112,11 +112,26 @@ internal fun UnderstandingPage(
             )
         }
     }
-    if (assumptions.isEmpty() && settled.isEmpty()) return
-    if (meaning.isNotBlank()) Spacer(Modifier.height(20.dp))
+    if (assumptions.isNotEmpty() || settled.isNotEmpty()) {
+        if (meaning.isNotBlank()) Spacer(Modifier.height(20.dp))
+        Assumptions(assumptions, settled, onSettle)
+    }
+    Spacer(Modifier.height(16.dp))
+    Text(
+        "This is the model's reading and can be wrong. Text written by someone else can steer it.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun Assumptions(assumptions: List<Assumption>, settled: List<Settled>, onSettle: (String, String) -> Unit) {
+    val open = assumptions.filterNot { a -> settled.any { it.about == a.about } }
+    var changing by remember { mutableStateOf<String?>(null) }
     Text("Assumptions", style = MaterialTheme.typography.titleMedium)
     Text(
-        "Where your text could be read more than one way, this is how it was read.",
+        "Where the text could be read more than one way, this is how the model read it.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

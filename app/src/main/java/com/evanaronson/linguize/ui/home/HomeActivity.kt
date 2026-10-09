@@ -16,6 +16,8 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.evanaronson.linguize.App
+import com.evanaronson.linguize.llm.CheckFailure.Reason
+import com.evanaronson.linguize.ui.card.CardState
 import com.evanaronson.linguize.ui.card.CheckViewModel
 import com.evanaronson.linguize.ui.history.HistoryViewModel
 import com.evanaronson.linguize.ui.history.SessionScreen
@@ -97,9 +99,15 @@ class HomeActivity : ComponentActivity() {
         outState.putString(BEFORE_CARD, beforeCard?.saved)
     }
 
-    /** Going home or to recents. Links this screen opens say they're not the user leaving. */
+    /**
+     * Going home or to recents. Links this screen opens say they're not the user leaving.
+     * A card waiting behind Settings is told to come back, so Settings is no longer the
+     * card's: opened again from the launcher, its back goes to Home as usual.
+     */
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
+        backToCard = false
+        beforeCard = null
         (application as App).settingsLeft.value++
     }
 
@@ -127,6 +135,7 @@ class HomeActivity : ComponentActivity() {
 
     private fun back() {
         if (screen != Screen.Settings || !backToCard) {
+            if (screen == Screen.Settings) retryAfterSettings()
             screen = Screen.Home
             return
         }
@@ -141,7 +150,19 @@ class HomeActivity : ComponentActivity() {
         (application as App).settingsLeft.value++
     }
 
+    /**
+     * Try it's card failed for something Settings fixes (a missing or rejected key, a model
+     * that can't be used): back from Settings, it checks again, as the overlay's card does.
+     */
+    private fun retryAfterSettings() {
+        val failed = check.state as? CardState.Failed ?: return
+        if (failed.reason in FIXED_IN_SETTINGS) check.recheck()
+    }
+
     companion object {
+        /** Failures whose card offers "Open settings" rather than Retry. */
+        private val FIXED_IN_SETTINGS = setOf(Reason.NoKey, Reason.BadKey, Reason.BadModel)
+
         private const val EXTRA_SETTINGS = "com.evanaronson.linguize.extra.SETTINGS"
         private const val SCREEN = "screen"
         private const val BACK_TO_CARD = "backToCard"

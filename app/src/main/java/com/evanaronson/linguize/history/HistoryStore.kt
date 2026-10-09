@@ -13,7 +13,7 @@ import java.io.OutputStream
  * never take the app down with it.
  *
  * [clear] and [delete] are final for the sessions they remove, including one still open
- * on a card: a later [save] or [close] of a session started before the last [clear], or
+ * on a card: a later [save] or [close] of a session open when the last [clear] ran, or
  * of one [delete]d, is dropped rather than bringing it back.
  */
 interface HistoryStore {
@@ -23,13 +23,16 @@ interface HistoryStore {
     /** Closes a session: writes its final row and its suggestions, in one transaction. */
     suspend fun close(session: SessionRecord, suggestions: List<SuggestionRecord>)
 
-    /** Marks sessions that never closed (the process ended) as [Outcome.Abandoned]. */
+    /**
+     * Closes, as [Outcome.Abandoned] at [now], every session left open that this process
+     * didn't open: the process that opened it ended with its card open.
+     */
     suspend fun markAbandoned(now: Long)
 
-    /** The number of sessions kept, not counting deleted ones. */
+    /** The number of sessions Recent can show: closed and not deleted. */
     fun count(): Flow<Int>
 
-    /** The date of the oldest session kept, or null when there are none. */
+    /** The date of the oldest session [count] counts, or null when there are none. */
     fun since(): Flow<Long?>
 
     /** Newest first, closed sessions only, not counting deleted ones. */
@@ -39,46 +42,75 @@ interface HistoryStore {
 
     /**
      * The most recent closed session matching [key], started at or after [since], whose
-     * last attempt succeeded: its verdict can be shown again without asking the model.
+     * last attempt succeeded, with its suggestions: the answer of its
+     * [decided attempt][SessionDetail.decidedAttempt] can be shown again without asking the model.
      */
-    suspend fun reusable(key: ReuseKey, since: Long): SessionRecord?
+    suspend fun reusable(key: ReuseKey, since: Long): SessionDetail?
 
     suspend fun delete(id: String)
 
-    /** Deletes everything. */
+    /** Deletes everything, leaving none of the text in the database's files. */
     suspend fun clear()
 
     /**
-     * Writes every kept session with its suggestions as JSON Lines, one [SessionDetail] per
-     * line. Returns false when it couldn't (the database or [out] failed); what was written
-     * to [out] by then is incomplete and shouldn't be shared.
+     * Writes every kept session with its suggestions as JSON Lines, one session per line in
+     * [SessionDetail]'s shape, written from the rows as they are stored. Returns false when
+     * it couldn't (the database or [out] failed); what was written to [out] by then is
+     * incomplete and shouldn't be shared.
      */
     suspend fun export(out: OutputStream): Boolean
 }
 
 /**
- * What [HistoryStore.clear] and [HistoryStore.delete] removed in this process, so a
- * session still open on a card when it was removed isn't written back by its next save
- * or its close. A store consults it inside the same transaction as the write, so a clear
- * and a save can't interleave. Sessions open in an earlier process are closed as
- * abandoned at start, so nothing older needs remembering.
+ * Which sessions this process opened and which it removed, so that [HistoryStore.clear]
+ * and [HistoryStore.delete] are final for a session still open on a card, and so that
+ * [HistoryStore.markAbandoned] knows which open sessions are someone else's. A store
+ * consults it inside the same transaction as the write, so a clear and a save can't
+ * interleave. Ids, not times: the wall clock can move backwards (a corrected clock, a
+ * manual change), and a comparison of times would then drop new sessions or keep old ones
+ * open for good.
+ *
+ * A session opened before a clear but whose first save only reaches the store after it
+ * is kept: the clear didn't see it. Saves are queued the moment a card opens, so this
+ * needs a clear within milliseconds of a check starting.
  */
-internal class Forgotten(private val clock: () -> Long) {
-    /** When everything was last cleared; sessions started then or before are gone. */
-    @Volatile
-    private var clearedAt = Long.MIN_VALUE
+internal class Forgotten {
+    /** Sessions saved by this process and not yet closed, cleared or deleted. */
+    private val open = mutableSetOf<String>()
 
-    private val deleted = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    /** Sessions cleared or deleted in this process: never written again. */
+    private val gone = mutableSetOf<String>()
 
+    /** A session is being saved: true when it may be, and then it counts as opened here. */
+    @Synchronized
+    fun saving(id: String): Boolean {
+        if (id in gone) return false
+        open += id
+        return true
+    }
+
+    /** A session is being closed: true when it may be. */
+    @Synchronized
+    fun closing(id: String): Boolean {
+        if (id in gone) return false
+        open -= id
+        return true
+    }
+
+    /** Everything was cleared: the sessions still open on a card are gone too. */
+    @Synchronized
     fun cleared() {
-        clearedAt = clock()
-        deleted.clear()
+        gone += open
+        open.clear()
     }
 
+    @Synchronized
     fun deleted(id: String) {
-        deleted += id
+        gone += id
+        open -= id
     }
 
-    /** Whether [session] may still be written. */
-    fun allows(session: SessionRecord): Boolean = session.startedAt > clearedAt && session.id !in deleted
+    /** The sessions this process opened that are still open: not abandoned. */
+    @Synchronized
+    fun openHere(): List<String> = open.toList()
 }

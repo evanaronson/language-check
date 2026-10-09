@@ -24,11 +24,15 @@ Replace what you want, in-line, and you're back where you were.
 
 Home, the screen Linguize opens to, has Try it and, below it, **Recent**: the checks you've made, newest first. Tap one to see it as the card showed it; swipe it away to delete it. Settings is behind the gear. Its **History** section turns remembering off (on by default; what's already kept stays), shows how much is kept, and has **Clear** and **Export** (a JSON Lines file). History stays on the phone.
 
-That's all most apps need. Later builds install over the previous one because they're all signed with the same key.
+That's all most apps need. Later builds install over the previous one because CI signs each one with the same private key.
+
+**Installed Linguize before 9 October 2026?** Builds until then were signed with a key that was public, so they were removed and the key was replaced. An app signed with the new key can't update one signed with the old key: uninstall Linguize once (Settings → Apps → Linguize → Uninstall; this deletes your history and saved keys), then install the latest APK. Later builds update normally again.
+
+To check a download, compare its signing certificate with the SHA-256 fingerprint in its release notes (`apksigner verify --print-certs linguize.apk`), or check where it was built with `gh attestation verify linguize.apk --repo evanaronson/linguize`.
 
 ### Optional: apps without the menu entry (e.g. Telegram, the Claude app…)
 
-Some apps don't show other apps' entries in their selection menu. For those, Linguize can add an accessibility button instead: while typing, tap the button and the same card floats over the app, then accepted changes are written back into the text field. It reads the focused text field only when you tap the button.
+Some apps don't show other apps' entries in their selection menu. For those, Linguize can add an accessibility button instead: while typing, tap the button and the same card floats over the app, then accepted changes are written back into the text field. It reads the focused text field only when you tap the button, and never a field for passwords, codes, numbers or email addresses. Back, or a tap outside the card, closes it.
 
 Android makes this a few taps because the app wasn't installed from the Play Store:
 
@@ -55,7 +59,7 @@ Everything is under `app/src/main/java/com/evanaronson/linguize/`. Dependencies 
 | `ui/home/` | `HomeActivity`, the launcher screen: Try it, then Recent, with Settings and a past check's page as screens of the same activity. |
 | `ui/settings/` | The settings screen (one file per section, History included) and its view model. |
 | `ui/theme/` | The brand theme. |
-| `menu/` | `CheckActivity`, opened from a selection-menu entry. |
+| `menu/` | `CheckActivity`, opened from a selection-menu entry; `CheckRateLimit` caps how many checks other apps can start through it (a few a minute per app). |
 | `accessibility/` | The accessibility button: `LinguizeAccessibilityService` reads the focused field and writes accepted changes back; `OverlayWindow` shows the card above other apps. |
 
 The prompt and schema live in `app/src/main/assets/` so the eval script uses exactly what the app sends, and a unit test checks every example in the prompt against the schema.
@@ -79,6 +83,10 @@ The wordmark is **lingu·ize**: the raised dot (the Catalan *punt volat*, as in 
 
 ## Build locally
 
-You need JDK 21 (the Robolectric tests need it) and the Android SDK. `./gradlew testDebugUnitTest` runs the tests; `./gradlew assembleRelease` writes the APK to `app/build/outputs/apk/release/`. A local release build has version 1 and is signed with the debug key, so it won't install over a release build from CI without uninstalling first.
+You need JDK 21 (the Robolectric tests need it) and the Android SDK. `./gradlew testDebugUnitTest` runs the tests and `./gradlew installDebug` puts a debug build on a connected phone. `./gradlew assembleRelease` writes an unsigned APK to `app/build/outputs/apk/release/`; add `-PdebugSignedRelease` to sign it with your debug key so it installs. A local build has version 1 and isn't signed with the release key, so it won't install over a build from CI without uninstalling first.
 
-Release builds are signed in CI with a private key kept in GitHub Actions secrets: `SIGNING_KEYSTORE_BASE64`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS` and `SIGNING_KEY_PASSWORD`. Without them CI refuses to build.
+### How releases are built and signed
+
+`.github/workflows/build.yml` has two jobs. **build** runs the tests and `assembleRelease` with no secrets and read-only access, and uploads the unsigned APK. **sign-and-publish** runs no code from the repo: it downloads that APK, signs it with the runner's own `apksigner`, verifies the signature, attests its provenance and publishes the release, with the certificate's SHA-256 fingerprint in the notes. Its key lives only in the `signing` GitHub environment (`SIGNING_KEYSTORE_BASE64`, a base64 PKCS12 keystore, plus `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS` and `SIGNING_KEY_PASSWORD`), which only `main` and `feature/*` may use. Without them the job stops with an error saying which are missing.
+
+Gradle checks what it downloads against two files: `distributionSha256Sum` in `gradle/wrapper/gradle-wrapper.properties` pins the Gradle distribution, and `gradle/verification-metadata.xml` pins the SHA-256 of every plugin and library. To write them, and again after changing the Gradle version or any dependency, run the workflow by hand with **pin_build_inputs** checked (`gh workflow run build.yml --ref <branch> -f pin_build_inputs=true`); it uploads both files, regenerated, as the `build-inputs` artifact to review and commit.

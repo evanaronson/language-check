@@ -18,6 +18,7 @@ class SessionRecordingTest {
         origin = Origin.Menu,
         hostApp = "org.telegram.messenger",
         requestedLanguage = "Catalan",
+        nativeLanguage = "English",
         punctuation = "Relaxed",
         judgments = "Both",
         provider = "anthropic",
@@ -227,6 +228,67 @@ class SessionRecordingTest {
     }
 
     @Test
+    fun aFixTheCopiedRewordingReplacedIsRetiredNotCopied() {
+        val recording = recording(rain)
+        val revision = rainRevision()
+        recording.succeeded(200, revision)
+        val fixed = revision.acceptAll(EditKind.Fix)
+        recording.changed(fixed)
+        // The rewording preview shows "Com portes la pluja?": the accepted fix isn't in it.
+        assertTrue("estàs" !in fixed.preview(EditKind.Natural).text)
+        recording.copied(EditKind.Natural)
+
+        val detail = recording.close(300, null)
+        assertEquals(Outcome.Copied, detail.session.outcome)
+        assertEquals(Decision.Copied, detail.only(EditKind.Natural).decision)
+        assertEquals(Decision.Retired, detail.only(EditKind.Fix).decision)
+    }
+
+    @Test
+    fun copyingTheSameTextEitherWayDecidesTheFixTheSame() {
+        // Fix accepted, rewording on offer, Natural copied; and both accepted, Fix copied: one text, one decision.
+        val viaNatural = recording(rain).apply {
+            succeeded(200, rainRevision())
+            changed(rainRevision().acceptAll(EditKind.Fix))
+            copied(EditKind.Natural)
+        }.close(300, null)
+        val viaFix = recording(rain).apply {
+            succeeded(200, rainRevision())
+            changed(rainRevision().acceptAll(EditKind.Fix).acceptAll(EditKind.Natural))
+            copied(EditKind.Fix)
+        }.close(300, null)
+        assertEquals(viaFix.only(EditKind.Fix).decision, viaNatural.only(EditKind.Fix).decision)
+        assertEquals(viaFix.only(EditKind.Natural).decision, viaNatural.only(EditKind.Natural).decision)
+    }
+
+    @Test
+    fun aChangeToAnEarlierAttemptsRevisionIsIgnored() {
+        val recording = recording(shower)
+        val first = showerRevision()
+        recording.succeeded(200, first)
+        // The re-check found only the fix.
+        val second = revision(shower, corrected = "Voy a tomar una ducha y te llamo después")
+        recording.succeeded(400, second)
+        // A late report from the first card.
+        recording.changed(first.acceptAll(EditKind.Fix))
+
+        val detail = recording.close(500, null)
+        assertTrue(detail.suggestions.filter { it.attempt == 0 }.all { it.decision == Decision.Superseded })
+        assertEquals(first.edits.size, detail.suggestions.count { it.attempt == 0 })
+        assertEquals(second.edits.size, detail.suggestions.count { it.attempt == 1 })
+        assertTrue(detail.suggestions.filter { it.attempt == 1 }.all { it.decision == Decision.Ignored })
+    }
+
+    @Test
+    fun theRawAnswerIsKeptEvenWhenItCouldntBeRead() {
+        val recording = recording(rain)
+        val session = recording.attempt(200, emptyList(), "not json", "BadResponse", "not in the expected format", null, null)
+        assertEquals("not json", session.attempts.single().raw)
+        assertTrue(!session.attempts.single().succeeded)
+        assertEquals("English", session.nativeLanguage)
+    }
+
+    @Test
     fun acceptedButNeverAppliedIsUndone() {
         val recording = recording(rain)
         val revision = rainRevision()
@@ -281,7 +343,7 @@ class SessionRecordingTest {
         val second = rainRevision().acceptMatching(fixed.acceptedEdits)
         val session = recording.attempt(400, listOf(Settled("who", "me")), "{}", null, null, second, "second meaning")
         assertEquals(2, session.attempts.size)
-        assertEquals(listOf(SettledAnswer("who", "me")), session.attempts[1].settled)
+        assertEquals(listOf(Settled("who", "me")), session.attempts[1].settled)
         assertEquals(400, session.updatedAt)
         assertEquals("second meaning", session.meaning)
 

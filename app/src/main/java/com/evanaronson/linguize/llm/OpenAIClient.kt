@@ -1,6 +1,5 @@
 package com.evanaronson.linguize.llm
 
-import com.evanaronson.linguize.core.Verdict
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
@@ -21,7 +20,7 @@ class OpenAIClient(private val http: OkHttpClient, private val prompt: Prompt) :
     /** Models that rejected reasoning effort "none"; they get their default instead. */
     private val noReasoningControl = ConcurrentHashMap.newKeySet<String>()
 
-    override suspend fun check(key: String, model: String, request: CheckRequest): Verdict {
+    override suspend fun check(key: String, model: String, request: CheckRequest): ModelAnswer {
         // One time limit for the whole check, the retry without reasoning control included.
         val deadline = Deadline(http)
         var noReasoning = model !in noReasoningControl
@@ -38,7 +37,7 @@ class OpenAIClient(private val http: OkHttpClient, private val prompt: Prompt) :
                 continue
             }
             if (code != 200) throw failure(code, payload)
-            return prompt.parseVerdict(answer(payload))
+            return prompt.read(answer(payload))
         }
     }
 

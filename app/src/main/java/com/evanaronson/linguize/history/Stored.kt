@@ -33,10 +33,14 @@ class Tokens<E : Enum<E>>(private val entries: List<E>, private val token: (E) -
     fun decode(stored: String?): E? = stored?.let { s -> entries.firstOrNull { token(it) == s } }
 
     /**
-     * Like [decode], but also accepts a constant's name: what settings and the first
-     * history builds wrote before there were tokens.
+     * Like [decode], but also accepts a constant's name: what settings wrote before there
+     * were tokens. (History rows written that way are rewritten when the database is
+     * upgraded, so history reads tokens only.)
      */
     fun decodeOrName(stored: String?): E? = decode(stored) ?: stored?.let { s -> entries.firstOrNull { it.name == s } }
+
+    /** Each constant's name mapped to its token, where the two differ: what an upgrade rewrites. */
+    internal fun renames(): Map<String, String> = entries.associate { it.name to token(it) }.filter { (name, token) -> name != token }
 }
 
 /** Every enum that's kept, with its tokens. */
@@ -113,9 +117,10 @@ object Stored {
 }
 
 /**
- * Writes an enum as its token in JSON (the export). Reading an unknown token fails with
- * a [SerializationException]; nothing reads the export back today, and the database
- * reads its columns through [Tokens.decode] instead.
+ * An enum as its token in JSON, so the records' serialized shape is the rows' shape. The
+ * export is written from the rows rather than through these (an unknown token travels
+ * as it is); reading an unknown token fails with a [SerializationException], which only
+ * a reader of the export would meet.
  */
 abstract class TokenSerializer<E : Enum<E>>(name: String, private val tokens: () -> Tokens<E>) : KSerializer<E> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("com.evanaronson.linguize.history.$name", PrimitiveKind.STRING)

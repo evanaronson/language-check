@@ -43,7 +43,7 @@ class CardActions(
             } else {
                 null
             },
-            onRetry = check::retry,
+            onRetry = check::recheck,
             onOpenSettings = onOpenSettings,
             onSettle = check::settle,
         )

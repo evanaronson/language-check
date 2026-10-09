@@ -7,7 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.evanaronson.linguize.App
-import com.evanaronson.linguize.core.CheckResult
+import com.evanaronson.linguize.history.Replayed
 import com.evanaronson.linguize.history.SessionDetail
 import com.evanaronson.linguize.history.SessionRecord
 import com.evanaronson.linguize.llm.CheckFailure
@@ -44,11 +44,13 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
     var page by mutableStateOf<SessionPage>(SessionPage.Loading)
         private set
 
-    /** Shows session [id]; does nothing if it's already the one shown. */
+    /**
+     * Shows session [id], read again each time: since it was last shown, its card may have
+     * closed or its first save landed. The same session stays on screen while it's reread.
+     */
     fun load(id: String) {
-        if (id == this.id) return
+        if (id != this.id) page = SessionPage.Loading
         this.id = id
-        page = SessionPage.Loading
         job?.cancel()
         job = viewModelScope.launch {
             val detail = app.history.detail(id)
@@ -56,14 +58,7 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
                 SessionPage.Missing
             } else {
                 // Creating the checker reads its prompt from assets, so not on the main thread.
-                withContext(Dispatchers.IO) {
-                    val result = try {
-                        app.checker.replay(detail.session, detail.suggestions)
-                    } catch (_: CheckFailure) {
-                        null
-                    }
-                    shown(detail, result)
-                }
+                withContext(Dispatchers.IO) { shown(detail, app.checker.replay(detail)) }
             }
         }
     }
@@ -75,11 +70,11 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
         app.appScope.launch { app.history.delete(id) }
     }
 
-    /** [result] is the last successful answer as `Checker.replay` rebuilt it; null when there's none to show. */
-    private fun shown(detail: SessionDetail, result: CheckResult?): SessionPage.Shown {
+    /** [replayed] is the card the session ended with ([com.evanaronson.linguize.history.replay]); null when there's none to show. */
+    private fun shown(detail: SessionDetail, replayed: Replayed?): SessionPage.Shown {
         val session = detail.session
         val failure = session.attempts.lastOrNull()?.failure
             ?.let { name -> CheckFailure.Reason.entries.firstOrNull { it.name == name } }
-        return SessionPage.Shown(session, labels.of(session.hostApp), result?.let { readOnlyCard(session, it) }, failure)
+        return SessionPage.Shown(session, labels.of(session.hostApp), replayed?.let(::readOnlyCard), failure)
     }
 }

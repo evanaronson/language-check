@@ -12,6 +12,7 @@ data class SessionContext(
     val origin: Origin,
     val hostApp: String?,
     val requestedLanguage: String?,
+    val nativeLanguage: String?,
     val punctuation: String,
     val judgments: String,
     val provider: String,
@@ -35,8 +36,9 @@ data class SessionContext(
  * accepted changes and applies them if the writer replaces the text; only an attempt
  * with a revision of its own makes the previous one's suggestions [Decision.Superseded].
  * What was accepted and what was copied is tracked per revision, since a re-check carries
- * identical accepted edits over as new edits ([Revision.acceptMatching]). Once closed,
- * further reports are ignored.
+ * identical accepted edits over as new edits ([Revision.acceptMatching]). A change to a
+ * revision other than the decided one (a late report from an earlier attempt) is ignored,
+ * and so is everything once closed.
  */
 class SessionRecording(
     text: String,
@@ -63,6 +65,9 @@ class SessionRecording(
     /** Edits of [revision] that were in a section's version when it was copied. */
     private val copiedEdits = mutableSetOf<Int>()
 
+    /** Fixes of [revision] left out of a copied version because a rewording in it replaced them. */
+    private val retiredInCopy = mutableSetOf<Int>()
+
     /** Kinds copied at any point in the session, for the outcome. */
     private val copiedKinds = mutableSetOf<EditKind>()
 
@@ -78,6 +83,7 @@ class SessionRecording(
             origin = context.origin,
             hostApp = context.hostApp,
             requestedLanguage = context.requestedLanguage,
+            nativeLanguage = context.nativeLanguage,
             text = text,
             textHash = hash(text),
             punctuation = context.punctuation,
@@ -92,14 +98,15 @@ class SessionRecording(
     /**
      * An attempt finished. [revision] is what the card now offers (null when the attempt
      * failed or the result has nothing to review); when there is one, the previous
-     * revision's suggestions become [Decision.Superseded]. [status] is what a successful
-     * attempt found. [reusedFrom] is the session whose kept verdict was shown instead of
-     * asking the model. Returns the session to save.
+     * revision's suggestions become [Decision.Superseded]. [raw] is the model's answer as it
+     * came, also kept when it couldn't be read; [status] is what a successful attempt found.
+     * [reusedFrom] is the session whose kept answer was shown instead of asking the model.
+     * Returns the session to save.
      */
     fun attempt(
         at: Long,
         settled: List<Settled>,
-        verdict: String?,
+        raw: String?,
         failure: String?,
         failureDetail: String?,
         revision: Revision?,
@@ -117,9 +124,10 @@ class SessionRecording(
             revisionAttempt = index
             everAccepted.clear()
             copiedEdits.clear()
+            retiredInCopy.clear()
             remember(revision)
         }
-        val attempt = Attempt(at, settled.map { SettledAnswer(it.about, it.answer) }, verdict, failure, failureDetail, reusedFrom)
+        val attempt = Attempt(at, settled, raw, failure, failureDetail, reusedFrom)
         val succeeded = failure == null
         session = session.copy(
             updatedAt = maxOf(session.updatedAt, at),
@@ -130,23 +138,34 @@ class SessionRecording(
         return session
     }
 
-    /** The writer accepted or undid something; [revision] is the new state. Ignored before any attempt offered one. */
+    /**
+     * The writer accepted or undid something; [revision] is the new state. Ignored before
+     * any attempt offered one, and when [revision] isn't a state of the decided one (its
+     * edits differ): a change to an earlier attempt's card can't decide this one's.
+     */
     fun changed(revision: Revision) {
-        if (closed != null || this.revision == null) return
+        val current = this.revision ?: return
+        if (closed != null || revision.edits != current.edits) return
         this.revision = revision
         remember(revision)
     }
 
     /**
-     * The writer copied the version shown for [kind]: the accepted changes that show in
-     * the text, and [kind]'s remaining suggestions.
+     * The writer copied the version shown for [kind]: what [Revision.preview] rendered,
+     * the accepted changes and [kind]'s remaining suggestions, less the fixes a rewording
+     * among them replaced. Those left the copy inside the rewording, so they end
+     * [Decision.Retired] rather than copied.
      */
     fun copied(kind: EditKind) {
         if (closed != null) return
         copiedKinds += kind
         revision?.let { revision ->
-            copiedEdits += revision.edits.filter { revision.isApplied(it.id) }.map { it.id }
-            copiedEdits += revision.remaining(kind).map { it.id }
+            val shown = revision.acceptedEdits + revision.remaining(kind)
+            val (replaced, rendered) = shown.partition { fix ->
+                fix.kind == EditKind.Fix && shown.any { it.kind == EditKind.Natural && it.touches(fix) }
+            }
+            copiedEdits += rendered.map { it.id }
+            retiredInCopy += replaced.map { it.id }
         }
     }
 
@@ -190,13 +209,15 @@ class SessionRecording(
             revision.isApplied(edit.id) -> Decision.Accepted
             revision.isRetired(edit.id) -> Decision.Retired
             edit.id in copiedEdits -> Decision.Copied
+            edit.id in retiredInCopy -> Decision.Retired
             edit.id in everAccepted -> Decision.Undone
             else -> Decision.Ignored
         }
     } else {
         when {
             edit.id in copiedEdits -> Decision.Copied
-            // A fix inside an accepted rewording that was copied left with the rewording.
+            // A fix inside a rewording that was copied left with the rewording.
+            edit.id in retiredInCopy -> Decision.Retired
             revision.isRetired(edit.id) && retiredByCopied(revision, edit) -> Decision.Retired
             edit.id in everAccepted -> Decision.Undone
             else -> Decision.Ignored

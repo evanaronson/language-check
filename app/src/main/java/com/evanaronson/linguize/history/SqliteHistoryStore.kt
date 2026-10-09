@@ -30,29 +30,29 @@ import java.io.OutputStream
  *
  * Deleting is a hard delete for now. The rows have `deletedAt` so a deletion can travel
  * once there's a sync; until then there's nothing to carry it, and the writer asked for
- * the text to be gone.
+ * the text to be gone: `secure_delete` overwrites what's deleted, a delete checkpoints the
+ * write-ahead log so no copy is left there, and [clear] also vacuums.
  */
 class SqliteHistoryStore(
     context: Context,
     name: String = HistorySchema.NAME,
-    clock: () -> Long = System::currentTimeMillis,
 ) : HistoryStore {
     private val context = context.applicationContext
     private val name = name
     private val helper = Helper(this.context, name)
 
-    /** Sessions cleared or deleted in this process, which an open card mustn't write back. */
-    private val forgotten = Forgotten(clock)
+    /** Sessions opened here, and ones cleared or deleted, which an open card mustn't write back. */
+    private val forgotten = Forgotten()
 
     /** Bumped after every write, so the observed queries run again. */
     private val changes = MutableStateFlow(0L)
 
     override suspend fun save(session: SessionRecord) = write("save a session") { db ->
-        if (forgotten.allows(session)) db.execute(HistorySchema.SAVE_SESSION, session.values().values)
+        if (forgotten.saving(session.id)) db.execute(HistorySchema.SAVE_SESSION, session.values().values)
     }
 
     override suspend fun close(session: SessionRecord, suggestions: List<SuggestionRecord>) = write("close a session") { db ->
-        if (!forgotten.allows(session)) return@write
+        if (!forgotten.closing(session.id)) return@write
         db.execute(HistorySchema.CLOSE_SESSION, session.values().values)
         // Closing twice writes the same rows again rather than adding to them.
         db.execute(HistorySchema.DELETE_SUGGESTIONS_OF, listOf(session.id))
@@ -69,14 +69,17 @@ class SqliteHistoryStore(
     }
 
     /**
-     * Closes sessions left open, started before [now]: call it with the time the process
-     * started, so a check that opens while this runs isn't caught. Doesn't make the
-     * database when there isn't one yet: then there's nothing to mark.
+     * Closes the sessions left open but those this store saved, read in the same transaction,
+     * so a check that opens while this runs isn't caught. Doesn't make the database when
+     * there isn't one yet: then there's nothing to mark.
      */
     override suspend fun markAbandoned(now: Long) {
         val exists = withContext(Dispatchers.IO) { context.getDatabasePath(name).exists() }
         if (!exists) return
-        write("mark abandoned sessions") { db -> db.execute(HistorySchema.MARK_ABANDONED, listOf(now, now, now)) }
+        write("mark abandoned sessions") { db ->
+            val keep = forgotten.openHere()
+            db.execute(HistorySchema.markAbandoned(keep.size), listOf(now, now) + keep)
+        }
     }
 
     override fun count(): Flow<Int> = observe("count sessions", 0) { db ->
@@ -93,31 +96,50 @@ class SqliteHistoryStore(
 
     override suspend fun detail(id: String): SessionDetail? = read("read a session", null) { db -> db.detail(id) }
 
-    override suspend fun reusable(key: ReuseKey, since: Long): SessionRecord? = read("look for a kept answer", null) { db ->
-        db.select(HistorySchema.reusable(key.requestedLanguage), HistorySchema.reusableArgs(key, since), ::sessionRecord)
+    override suspend fun reusable(key: ReuseKey, since: Long): SessionDetail? = read("look for a kept answer", null) { db ->
+        db.select(HistorySchema.reusable(key), HistorySchema.reusableArgs(key, since), ::sessionRecord)
             .firstOrNull { it.lastAttemptSucceeded() }
+            ?.let { SessionDetail(it, db.suggestions(it.id)) }
     }
 
     /** Removes the session and, by cascade, its suggestions. */
-    override suspend fun delete(id: String) = write("delete a session") { db ->
-        forgotten.deleted(id)
-        db.execute(HistorySchema.DELETE_SESSION, listOf(id))
+    override suspend fun delete(id: String) {
+        write("delete a session") { db ->
+            forgotten.deleted(id)
+            db.execute(HistorySchema.DELETE_SESSION, listOf(id))
+        }
+        read("checkpoint after a delete", Unit) { db -> db.checkpoint() }
     }
 
-    override suspend fun clear() = write("clear history") { db ->
-        forgotten.cleared()
-        HistorySchema.CLEAR.forEach(db::execSQL)
+    override suspend fun clear() {
+        write("clear history") { db ->
+            forgotten.cleared()
+            HistorySchema.CLEAR.forEach(db::execSQL)
+        }
+        // Outside the transaction, which VACUUM can't run in: rebuilds the file without the
+        // freed pages, then empties the write-ahead log, which can still hold copies of them.
+        read("vacuum after clearing", Unit) { db ->
+            db.execSQL("VACUUM")
+            db.checkpoint()
+        }
     }
 
-    /** Oldest first. Leaves [out] open; the caller closes it. */
+    /**
+     * Oldest first, each row as it's stored ([rowJson]): nothing is decoded and encoded
+     * again, so what a newer build wrote leaves as it was. Leaves [out] open; the caller
+     * closes it.
+     */
     override suspend fun export(out: OutputStream): Boolean = read("export history", false) { db ->
         val writer = out.bufferedWriter()
         // One transaction, so a delete during the export can't split a session from its suggestions.
         db.beginTransaction()
         try {
             db.eachRow(HistorySchema.ALL_SESSIONS) { row ->
-                val session = sessionRecord(row)
-                writer.write(exportLine(SessionDetail(session, db.suggestions(session.id))))
+                val session = rowJson(row, HistorySchema.SESSION_COLUMNS)
+                val suggestions = db.select(HistorySchema.SESSION_SUGGESTIONS, listOf(row.string("id"))) {
+                    rowJson(it, HistorySchema.SUGGESTION_COLUMNS)
+                }
+                writer.write(exportLine(session, suggestions))
                 writer.newLine()
             }
             db.setTransactionSuccessful()
@@ -172,6 +194,8 @@ class SqliteHistoryStore(
 
         override fun onConfigure(db: SQLiteDatabase) {
             db.setForeignKeyConstraintsEnabled(true)
+            // Deleted rows are overwritten with zeros rather than left in free pages.
+            db.pragma("secure_delete = ON")
         }
 
         override fun onCreate(db: SQLiteDatabase) {
@@ -179,15 +203,46 @@ class SqliteHistoryStore(
         }
 
         /**
-         * There's only version 1. Whoever makes version 2 writes the migration here; until
-         * then, refusing to open (which every call logs and survives) beats reading a
-         * database whose shape the queries don't know.
+         * Runs [HistorySchema.upgrade] and rewrites each session's attempts, in the one
+         * transaction the framework opens for it. A version with no way up (none exists
+         * today, but a refusal here would turn history off for good, with only a log line)
+         * is started afresh instead: the old rows are dropped, and that is logged.
          */
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            error("No migration for history from version $oldVersion to $newVersion")
+            val statements = HistorySchema.upgrade(oldVersion, db.columns(HistorySchema.SESSIONS))
+            if (statements == null) {
+                Log.w(TAG, "No way to upgrade history from version $oldVersion to $newVersion; starting afresh")
+                HistorySchema.DROP.forEach(db::execSQL)
+                onCreate(db)
+                return
+            }
+            statements.forEach(db::execSQL)
+            val rewritten = buildList {
+                db.eachRow(HistorySchema.ALL_ATTEMPTS) { row ->
+                    val stored = row.string("attempts")
+                    val upgraded = upgradeAttempts(stored)
+                    if (upgraded != stored) add(listOf(upgraded, row.string("id")))
+                }
+            }
+            rewritten.forEach { db.execute(HistorySchema.SET_ATTEMPTS, it) }
         }
     }
 }
+
+/** A PRAGMA that answers with a row, which execSQL refuses: runs it and reads the answer. */
+private fun SQLiteDatabase.pragma(pragma: String) {
+    rawQuery("PRAGMA $pragma", null).use { it.moveToFirst() }
+}
+
+/** Copies the write-ahead log into the database and empties it. */
+private fun SQLiteDatabase.checkpoint() = pragma("wal_checkpoint(TRUNCATE)")
+
+/** The names of [table]'s columns. */
+private fun SQLiteDatabase.columns(table: String): Set<String> =
+    rawQuery("PRAGMA table_info($table)", null).use { cursor ->
+        val name = cursor.getColumnIndexOrThrow("name")
+        buildSet { while (cursor.moveToNext()) add(cursor.getString(name)) }
+    }
 
 private const val TAG = "History"
 

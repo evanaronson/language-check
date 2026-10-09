@@ -68,6 +68,37 @@ class GeminiClientTest {
         assertTrue("\"maxOutputTokens\":${Prompt.MAX_OUTPUT_TOKENS}" in http.body(0))
     }
 
+    @Test
+    fun modelPagesAreFollowedUntilThereIsNoNextToken() {
+        val http = FakeHttp { _, index ->
+            200 to modelsPage("gemini-$index-flash", next = if (index < 2) "t$index" else null)
+        }
+        val ids = runBlocking { GeminiClient(http.client, prompt).models("key") }
+        assertEquals(listOf("gemini-2-flash", "gemini-1-flash", "gemini-0-flash"), ids)
+        assertEquals(listOf(null, "t0", "t1"), http.requests.map { it.url.queryParameter("pageToken") })
+    }
+
+    @Test
+    fun aRepeatedPageTokenEndsTheModelList() {
+        val http = FakeHttp { _, index -> 200 to modelsPage("gemini-$index-flash", next = "same") }
+        val ids = runBlocking { GeminiClient(http.client, prompt).models("key") }
+        assertEquals(2, http.requests.size)
+        assertEquals(listOf("gemini-1-flash", "gemini-0-flash"), ids)
+    }
+
+    @Test
+    fun modelPagesStopAtTheCap() {
+        val http = FakeHttp { _, index -> 200 to modelsPage("gemini-$index-flash", next = "t$index") }
+        val ids = runBlocking { GeminiClient(http.client, prompt).models("key") }
+        assertEquals(GeminiClient.MAX_MODEL_PAGES, http.requests.size)
+        assertEquals(GeminiClient.MAX_MODEL_PAGES, ids.size)
+    }
+
+    private fun modelsPage(id: String, next: String?): String {
+        val token = next?.let { ""","nextPageToken":"$it"""" }.orEmpty()
+        return """{"models":[{"name":"models/$id","supportedGenerationMethods":["generateContent"]}]$token}"""
+    }
+
     private fun answer(text: String) =
         """{"candidates":[{"content":{"parts":[{"text":${JsonPrimitive(text)}}]},"finishReason":"STOP"}]}"""
 }

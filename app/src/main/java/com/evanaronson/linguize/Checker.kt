@@ -1,7 +1,6 @@
 package com.evanaronson.linguize
 
 import com.evanaronson.linguize.core.CheckResult
-import com.evanaronson.linguize.core.Edit
 import com.evanaronson.linguize.core.Judgments
 import com.evanaronson.linguize.core.Language
 import com.evanaronson.linguize.core.Punctuation
@@ -9,10 +8,8 @@ import com.evanaronson.linguize.core.Settled
 import com.evanaronson.linguize.core.interpret
 import com.evanaronson.linguize.data.ApiKeys
 import com.evanaronson.linguize.data.Settings
-import com.evanaronson.linguize.history.Decision
-import com.evanaronson.linguize.history.SessionRecord
-import com.evanaronson.linguize.history.Stored
-import com.evanaronson.linguize.history.SuggestionRecord
+import com.evanaronson.linguize.history.Replayed
+import com.evanaronson.linguize.history.SessionDetail
 import com.evanaronson.linguize.llm.CheckFailure
 import com.evanaronson.linguize.llm.CheckRequest
 import com.evanaronson.linguize.llm.Prompt
@@ -34,12 +31,13 @@ data class CheckContext(
     val promptHash: String,
 )
 
-/** A finished check: what the card shows, the model's answer as JSON ([Prompt.verdictJson]), and the settings it ran with. */
-data class Checked(val result: CheckResult, val verdict: String, val context: CheckContext)
+/** A finished check: what the card shows, the model's answer exactly as it came ([raw]), and the settings it ran with. */
+data class Checked(val result: CheckResult, val raw: String, val context: CheckContext)
 
 /**
  * Runs checks with the provider, model and options chosen in settings.
- * Every failure is a [CheckFailure]. Storage, key decryption and the network run off the main thread.
+ * Every failure is a [CheckFailure]; one about an answer that came but couldn't be used
+ * carries it as [CheckFailure.raw]. Storage, key decryption and the network run off the main thread.
  */
 class Checker(
     private val settings: Settings,
@@ -65,48 +63,27 @@ class Checker(
         return failingAsCheckFailure {
             val used = context ?: readContext()
             val request = CheckRequest(text, language, used.punctuation, used.judgments, settled, used.native)
-            val verdict = clients.getValue(used.provider).check(key(used.provider), used.model, request)
-            Checked(interpret(text, verdict, used.judgments, expectedLanguage = language?.name), prompt.verdictJson(verdict), used)
+            val answer = clients.getValue(used.provider).check(key(used.provider), used.model, request)
+            val result = try {
+                interpret(text, answer.verdict, used.judgments, expectedLanguage = language?.name)
+            } catch (e: RuntimeException) {
+                throw CheckFailure(CheckFailure.Reason.BadResponse, e.message, e, raw = answer.raw)
+            }
+            Checked(result, answer.raw, used)
         }
     }
 
     /**
-     * Shows a [verdict] kept from an earlier check of the same [text] (JSON, as [Checked.verdict])
+     * Shows an answer kept from an earlier check of the same [text] ([raw], as [Checked.raw])
      * again, without asking the model. Throws [CheckFailure] when it can't be read.
      */
-    suspend fun reuse(text: String, language: Language?, verdict: String, context: CheckContext): Checked = failingAsCheckFailure {
-        val result = interpret(text, prompt.parseVerdict(verdict), context.judgments, expectedLanguage = language?.name)
-        Checked(result, verdict, context)
+    suspend fun reuse(text: String, language: Language?, raw: String, context: CheckContext): Checked = failingAsCheckFailure {
+        val result = interpret(text, prompt.parseVerdict(raw), context.judgments, expectedLanguage = language?.name)
+        Checked(result, raw, context)
     }
 
-    /**
-     * The card a past [session] ended with, rebuilt from its stored verdict, with the
-     * suggestions the writer took ([Decision.Accepted] in [suggestions]) accepted again.
-     * The verdict is the decided attempt's: the one the session's non-superseded
-     * suggestions came from, or else the last attempt that succeeded. Null when no attempt
-     * succeeded or the stored verdict can't be read. Pure computation; never throws.
-     */
-    fun replay(session: SessionRecord, suggestions: List<SuggestionRecord>): CheckResult? {
-        val succeeded = session.attempts.indices.filter { session.attempts[it].let { a -> a.verdict != null && a.failure == null } }
-        val decided = suggestions.filter { it.decision != Decision.Superseded }.maxOfOrNull { it.attempt }
-        val index = decided?.takeIf { it in succeeded } ?: succeeded.lastOrNull() ?: return null
-        val verdict = try {
-            prompt.parseVerdict(session.attempts[index].verdict ?: return null)
-        } catch (_: CheckFailure) {
-            return null
-        }
-        val judgments = Stored.judgments.decodeOrName(session.judgments) ?: Judgments.Both
-        val result = try {
-            interpret(session.text, verdict, judgments, expectedLanguage = session.requestedLanguage)
-        } catch (_: RuntimeException) {
-            return null
-        }
-        if (result !is CheckResult.Reviewed) return result
-        val taken = suggestions
-            .filter { it.attempt == index && it.decision == Decision.Accepted }
-            .map { Edit(id = -1, kind = it.kind, start = it.start, end = it.end, from = it.fromText, replacement = it.toText, why = it.why) }
-        return result.copy(revision = result.revision.acceptMatching(taken))
-    }
+    /** The card a past session ended with ([com.evanaronson.linguize.history.replay]), reading answers as checks do. */
+    fun replay(detail: SessionDetail): Replayed? = com.evanaronson.linguize.history.replay(detail, prompt::parseVerdict)
 
     /** Runs a short check with [model]; returns how long it took in milliseconds. */
     suspend fun testModel(provider: Provider, model: String): Long = failingAsCheckFailure {

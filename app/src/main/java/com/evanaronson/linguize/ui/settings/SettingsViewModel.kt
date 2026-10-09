@@ -2,6 +2,7 @@ package com.evanaronson.linguize.ui.settings
 
 import android.app.Application
 import android.net.Uri
+import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -15,16 +16,20 @@ import com.evanaronson.linguize.data.KeyStatus
 import com.evanaronson.linguize.data.MenuEntry
 import com.evanaronson.linguize.llm.CheckFailure
 import com.evanaronson.linguize.llm.Provider
+import com.evanaronson.linguize.ui.Exports
 import com.evanaronson.linguize.ui.card.title
+import com.evanaronson.linguize.ui.forgetExports
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.io.IOException
 import java.time.LocalDate
 
@@ -74,6 +79,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val app = application as App
     private var modelsJob: Job? = null
     private var testJob: Job? = null
+    private val exports = Exports(application.cacheDir)
+
+    /** Selection-menu writes, one at a time (see [toggleMenuEntry]). */
+    private val menuWrites = Mutex()
 
     /** Null until the saved settings have been read. */
     var state by mutableStateOf<SettingsState?>(null)
@@ -88,14 +97,19 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         private set
 
     /**
-     * The export just finished, until the screen showing settings has offered it and called
-     * [exportOffered]. State rather than a callback, so the share sheet opens from the
-     * activity on screen even when the one that asked was recreated meanwhile.
+     * The export just finished, until the screen showing settings takes it with [takeExport].
+     * State rather than a callback, so the share sheet opens from the activity on screen even
+     * when the one that asked was recreated meanwhile.
      */
     var exported by mutableStateOf<Export?>(null)
         private set
 
+    /** When [exported] finished, on the uptime clock. */
+    private var exportedAt = 0L
+
     init {
+        // Exports left from earlier visits, once whatever they were shared with has had its time.
+        app.appScope.launch(Dispatchers.IO) { exports.prune() }
         viewModelScope.launch {
             state = withContext(Dispatchers.IO) {
                 val settings = app.settings
@@ -119,8 +133,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val on = entry !in menu
         if (!on && menu.size == 1) return
         change { it.copy(menu = if (on) it.menu + entry else it.menu - entry) }
-        // A call to the package manager, so off the main thread.
-        viewModelScope.launch(Dispatchers.IO) { app.menu.setEnabled(entry, on) }
+        // A call to the package manager, so off the main thread. Quick toggles start writes that
+        // could land in any order, so they run one at a time and each writes the switch's state
+        // as it is then: the last one to run leaves the menu as the screen shows it.
+        viewModelScope.launch(Dispatchers.IO) {
+            menuWrites.withLock {
+                val menu = state?.menu ?: return@withLock
+                app.menu.setEnabled(entry, entry in menu)
+            }
+        }
     }
 
     fun setPunctuation(punctuation: Punctuation) = change { state ->
@@ -187,14 +208,19 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         state.copy(historyEnabled = enabled)
     }
 
-    /** Deletes all history. On the app's scope, so leaving settings doesn't stop it halfway. */
+    /**
+     * Deletes all history, and any export of it. On the app's scope, so leaving settings
+     * doesn't stop it halfway.
+     */
     fun clearHistory() {
         app.appScope.launch { app.history.clear() }
+        app.forgetExports()
     }
 
     /**
      * Writes all history to a JSON Lines file in the cache, replacing earlier exports, and
-     * sets [exported] to a shareable link to it, or to [Export.Failed].
+     * sets [exported] to a shareable link to it, or to [Export.Failed]. The file is removed
+     * again a few minutes later (see [Exports]).
      */
     fun exportHistory() {
         if (exporting) return
@@ -202,10 +228,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         exported = null
         viewModelScope.launch {
             val uri = withContext(Dispatchers.IO) {
-                try {
-                    val folder = File(app.cacheDir, EXPORTS).apply { mkdirs() }
-                    folder.listFiles()?.forEach { it.delete() }
-                    val file = File(folder, "linguize-history-${LocalDate.now()}.jsonl")
+                val shared = try {
+                    val file = exports.create(LocalDate.now())
                     val written = file.outputStream().buffered().use { app.history.export(it) }
                     // A partial file isn't worth sharing.
                     if (written) FileProvider.getUriForFile(app, "${app.packageName}.files", file) else null
@@ -215,15 +239,36 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     // FileProvider: the folder isn't one res/xml/file_paths.xml shares.
                     null
                 }
+                // Nothing of a failed export is left behind.
+                if (shared == null) exports.clear()
+                shared
             }
             exporting = false
+            exportedAt = SystemClock.elapsedRealtime()
             exported = uri?.let { Export.Ready(it) } ?: Export.Failed
+            if (uri != null) {
+                // Long enough for the app it's shared with to read it; if the process ends first,
+                // the next visit to settings removes it.
+                app.appScope.launch {
+                    delay(Exports.KEEP_MILLIS + PRUNE_SLACK_MILLIS)
+                    withContext(Dispatchers.IO) { exports.prune() }
+                }
+            }
         }
     }
 
-    /** The screen has offered [exported]; it isn't offered again. */
-    fun exportOffered() {
+    /**
+     * Takes [exported] for the screen to offer, which it does only while settings is showing.
+     * Null when there's nothing to offer, or when the export finished a while ago: settings was
+     * left as it was being written, and a share sheet opening by itself later would be a
+     * surprise. Such an export is dropped, and its file removed.
+     */
+    fun takeExport(): Export? {
+        val export = exported ?: return null
         exported = null
+        if (SystemClock.elapsedRealtime() - exportedAt <= OFFER_WITHIN_MILLIS) return export
+        if (export is Export.Ready) app.appScope.launch(Dispatchers.IO) { exports.clear() }
+        return null
     }
 
     private fun loadModels() {
@@ -252,7 +297,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     private companion object {
-        /** The cache folder res/xml/file_paths.xml shares. */
-        const val EXPORTS = "exports"
+        /** How long a finished export may wait for settings to show again and offer it: a rotation, not a later visit. */
+        const val OFFER_WITHIN_MILLIS = 10_000L
+
+        /** So the file is past [Exports.KEEP_MILLIS] when the delayed prune looks at it. */
+        const val PRUNE_SLACK_MILLIS = 1_000L
     }
 }

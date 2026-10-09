@@ -8,9 +8,13 @@ import com.evanaronson.linguize.core.EditKind
  *
  * Columns are named exactly like the fields of the records, so a row in a SQLite browser
  * reads like the JSON it exports as. Enums are stored as their [Stored] tokens and read
- * leniently. `attempts` is JSON (it's
- * kept for re-deriving things later, never queried); everything else is a real column.
- * Identifiers are always double-quoted because `end` is an SQL keyword.
+ * leniently. `attempts` is JSON (it's kept for re-deriving things later, never queried);
+ * everything else is a real column. Identifiers are always double-quoted because `end` is
+ * an SQL keyword.
+ *
+ * Versions: 1 was the first history build (enums stored by constant name, no `status`
+ * at first, an attempt's answer under `verdict`); 2 adds `nativeLanguage` and stores
+ * tokens and `raw`. [upgrade] says how to get from each older version to this one.
  */
 internal object HistorySchema {
     const val NAME = "history.db"
@@ -19,7 +23,7 @@ internal object HistorySchema {
      * The database's version, for SQLiteOpenHelper. Separate from [SessionRecord.SCHEMA],
      * which is the shape of a row as it would travel to a server.
      */
-    const val VERSION = 1
+    const val VERSION = 2
 
     const val SESSIONS = "sessions"
     const val SUGGESTIONS = "suggestions"
@@ -27,7 +31,7 @@ internal object HistorySchema {
     /** In [SessionRecord]'s field order; a test holds the two together. */
     val SESSION_COLUMNS = listOf(
         "id", "deviceId", "schema", "createdAt", "updatedAt", "deletedAt", "startedAt", "closedAt",
-        "origin", "hostApp", "requestedLanguage", "text", "textHash", "finalText", "outcome",
+        "origin", "hostApp", "requestedLanguage", "nativeLanguage", "text", "textHash", "finalText", "outcome",
         "punctuation", "judgments", "provider", "model", "promptHash", "appVersion", "attempts", "meaning", "status",
     )
 
@@ -51,6 +55,7 @@ internal object HistorySchema {
             "origin" TEXT NOT NULL,
             "hostApp" TEXT,
             "requestedLanguage" TEXT,
+            "nativeLanguage" TEXT,
             "text" TEXT NOT NULL,
             "textHash" TEXT NOT NULL,
             "finalText" TEXT,
@@ -107,15 +112,24 @@ internal object HistorySchema {
     val INSERT_SUGGESTION = "INSERT OR REPLACE INTO $SUGGESTIONS (${quoted(SUGGESTION_COLUMNS)}) " +
         "VALUES (${SUGGESTION_COLUMNS.joinToString { "?" }})"
 
-    /** Binds now, now, and the start of this process: sessions opened since are left alone. */
-    val MARK_ABANDONED = """
+    /**
+     * Closes every open session but [keep] of them, as abandoned; binds now, now, then the
+     * ids to keep: the sessions this process opened. No clock decides what's abandoned, so
+     * a clock set back between two runs can't leave a session open for good.
+     */
+    fun markAbandoned(keep: Int): String {
+        val kept = if (keep == 0) "" else """ AND "id" NOT IN (${List(keep) { "?" }.joinToString()})"""
+        return """
         UPDATE $SESSIONS SET "closedAt" = ?, "updatedAt" = ?, "outcome" = '${Stored.outcome.encode(Outcome.Abandoned)}'
-        WHERE "closedAt" IS NULL AND "startedAt" < ?
-    """.trimIndent()
+        WHERE "closedAt" IS NULL$kept
+        """.trimIndent()
+    }
 
-    const val COUNT = """SELECT COUNT(*) AS "n" FROM $SESSIONS WHERE "deletedAt" IS NULL"""
+    /** Sessions Recent can show: kept and closed. A card still open isn't counted until it closes. */
+    const val COUNT = """SELECT COUNT(*) AS "n" FROM $SESSIONS WHERE "deletedAt" IS NULL AND "closedAt" IS NOT NULL"""
 
-    const val SINCE = """SELECT MIN("startedAt") AS "since" FROM $SESSIONS WHERE "deletedAt" IS NULL"""
+    /** The oldest session Recent can show, as [COUNT] counts them. */
+    const val SINCE = """SELECT MIN("startedAt") AS "since" FROM $SESSIONS WHERE "deletedAt" IS NULL AND "closedAt" IS NOT NULL"""
 
     /**
      * Closed, kept sessions, newest first, with counts from the suggestions that weren't
@@ -153,15 +167,16 @@ internal object HistorySchema {
     const val ALL_SESSIONS = """SELECT * FROM $SESSIONS WHERE "deletedAt" IS NULL ORDER BY "startedAt" """
 
     /**
-     * Candidates for reuse, newest first; binds [reusableArgs]. Whether the last attempt
-     * succeeded is read from `attempts` by the caller.
+     * Candidates for reuse of [key], newest first; binds [reusableArgs]. Whether the last
+     * attempt succeeded is read from `attempts` by the caller.
      */
-    fun reusable(requestedLanguage: String?): String {
-        val language = if (requestedLanguage == null) "\"requestedLanguage\" IS NULL" else "\"requestedLanguage\" = ?"
+    fun reusable(key: ReuseKey): String {
+        // Null matches null: an auto-detected check matches an auto-detected one.
+        fun same(column: String, value: String?) = if (value == null) "\"$column\" IS NULL" else "\"$column\" = ?"
         return """
         SELECT * FROM $SESSIONS
         WHERE "textHash" = ?
-            AND $language
+            AND ${same("requestedLanguage", key.requestedLanguage)} AND ${same("nativeLanguage", key.nativeLanguage)}
             AND "punctuation" = ? AND "judgments" = ? AND "provider" = ? AND "model" = ? AND "promptHash" = ?
             AND "startedAt" >= ?
             AND "closedAt" IS NOT NULL AND "deletedAt" IS NULL AND "outcome" != '${Stored.outcome.encode(Outcome.Failed)}'
@@ -172,13 +187,58 @@ internal object HistorySchema {
 
     /** The values [reusable] binds, in order. */
     fun reusableArgs(key: ReuseKey, since: Long): List<String> =
-        listOfNotNull(key.textHash, key.requestedLanguage, key.punctuation, key.judgments, key.provider, key.model, key.promptHash) +
+        listOfNotNull(key.textHash, key.requestedLanguage, key.nativeLanguage, key.punctuation, key.judgments, key.provider, key.model, key.promptHash) +
             since.toString()
 
     const val DELETE_SESSION = """DELETE FROM $SESSIONS WHERE "id" = ?"""
 
     /** Clearing everything; the suggestions go by cascade too, this is just quicker. */
     val CLEAR = listOf("DELETE FROM $SUGGESTIONS", "DELETE FROM $SESSIONS")
+
+    /** Every table, for starting over when an old database can't be upgraded. */
+    val DROP = listOf("DROP TABLE IF EXISTS $SUGGESTIONS", "DROP TABLE IF EXISTS $SESSIONS")
+
+    /** A session's attempts, for rewriting them on an upgrade. */
+    const val ALL_ATTEMPTS = """SELECT "id", "attempts" FROM $SESSIONS"""
+
+    const val SET_ATTEMPTS = """UPDATE $SESSIONS SET "attempts" = ? WHERE "id" = ?"""
+
+    /**
+     * The statements that bring a database from version [from] to [VERSION], given the
+     * columns its `sessions` table has; null when there's no way (then it's made afresh).
+     * Attempts are rewritten separately, row by row ([upgradeAttempts]).
+     *
+     * Version 1 came in two shapes: the first builds had no `status` column, and builds
+     * from the token change on added it without changing the version. Both had enums by
+     * constant name ("Accepted", "Gemini"), which become tokens here, so the counts in
+     * Recent and the reuse lookup, which compare tokens, see every row.
+     */
+    fun upgrade(from: Int, sessionColumns: Set<String>): List<String>? {
+        if (from != 1) return null
+        return buildList {
+            if ("status" !in sessionColumns) add("""ALTER TABLE $SESSIONS ADD COLUMN "status" TEXT""")
+            if ("nativeLanguage" !in sessionColumns) add("""ALTER TABLE $SESSIONS ADD COLUMN "nativeLanguage" TEXT""")
+            add(renaming(SESSIONS, "origin", Stored.origin))
+            add(renaming(SESSIONS, "outcome", Stored.outcome))
+            add(renaming(SESSIONS, "status", Stored.status))
+            add(renaming(SESSIONS, "punctuation", Stored.punctuation))
+            add(renaming(SESSIONS, "judgments", Stored.judgments))
+            add(renaming(SESSIONS, "provider", Stored.provider))
+            add(renaming(SUGGESTIONS, "kind", Stored.editKind))
+            add(renaming(SUGGESTIONS, "decision", Stored.decision))
+            // Rows now have this build's shape.
+            add("""UPDATE $SESSIONS SET "schema" = ${SessionRecord.SCHEMA}""")
+            add("""UPDATE $SUGGESTIONS SET "schema" = ${SessionRecord.SCHEMA}""")
+        }
+    }
+
+    /** Rewrites [column] from constant names to [tokens]; anything else is left as it is. */
+    private fun renaming(table: String, column: String, tokens: Tokens<*>): String {
+        val renames = tokens.renames()
+        val cases = renames.entries.joinToString(" ") { (name, token) -> "WHEN '$name' THEN '$token'" }
+        val names = renames.keys.joinToString { "'$it'" }
+        return """UPDATE $table SET "$column" = CASE "$column" $cases END WHERE "$column" IN ($names)"""
+    }
 
     const val DELETE_SUGGESTIONS_OF = """DELETE FROM $SUGGESTIONS WHERE "sessionId" = ?"""
 
@@ -211,9 +271,10 @@ internal fun SessionRecord.values(): Map<String, Any?> = linkedMapOf(
     "deletedAt" to deletedAt,
     "startedAt" to startedAt,
     "closedAt" to closedAt,
-    "origin" to Stored.origin.encode(origin),
+    "origin" to origin?.let(Stored.origin::encode),
     "hostApp" to hostApp,
     "requestedLanguage" to requestedLanguage,
+    "nativeLanguage" to nativeLanguage,
     "text" to text,
     "textHash" to textHash,
     "finalText" to finalText,
@@ -251,8 +312,8 @@ internal fun SuggestionRecord.values(): Map<String, Any?> = linkedMapOf(
 
 /**
  * A session row as a record. Lenient where a newer build could have written something
- * this one doesn't know: an unknown origin reads as [UNKNOWN_ORIGIN], an unknown outcome
- * as null, unreadable attempts as none.
+ * this one doesn't know: an unknown origin, outcome or status reads as null, unreadable
+ * attempts as none. For showing and reusing only; the export reads the rows themselves.
  */
 internal fun sessionRecord(row: Row) = SessionRecord(
     id = row.string("id"),
@@ -263,13 +324,14 @@ internal fun sessionRecord(row: Row) = SessionRecord(
     deletedAt = row.longOrNull("deletedAt"),
     startedAt = row.long("startedAt"),
     closedAt = row.longOrNull("closedAt"),
-    origin = Stored.origin.decodeOrName(row.string("origin")) ?: UNKNOWN_ORIGIN,
+    origin = Stored.origin.decode(row.string("origin")),
     hostApp = row.stringOrNull("hostApp"),
     requestedLanguage = row.stringOrNull("requestedLanguage"),
+    nativeLanguage = row.stringOrNull("nativeLanguage"),
     text = row.string("text"),
     textHash = row.string("textHash"),
     finalText = row.stringOrNull("finalText"),
-    outcome = Stored.outcome.decodeOrName(row.stringOrNull("outcome")),
+    outcome = Stored.outcome.decode(row.stringOrNull("outcome")),
     punctuation = row.string("punctuation"),
     judgments = row.string("judgments"),
     provider = row.string("provider"),
@@ -286,8 +348,8 @@ internal fun sessionRecord(row: Row) = SessionRecord(
  * doesn't know: a suggestion can't be shown or counted without them.
  */
 internal fun suggestionRecord(row: Row): SuggestionRecord? {
-    val kind = Stored.editKind.decodeOrName(row.string("kind")) ?: return null
-    val decision = Stored.decision.decodeOrName(row.string("decision")) ?: return null
+    val kind = Stored.editKind.decode(row.string("kind")) ?: return null
+    val decision = Stored.decision.decode(row.string("decision")) ?: return null
     return SuggestionRecord(
         id = row.string("id"),
         sessionId = row.string("sessionId"),
@@ -312,22 +374,20 @@ internal fun suggestionRecord(row: Row): SuggestionRecord? {
 internal fun sessionSummary(row: Row) = SessionSummary(
     id = row.string("id"),
     startedAt = row.long("startedAt"),
-    origin = Stored.origin.decodeOrName(row.string("origin")) ?: UNKNOWN_ORIGIN,
+    origin = Stored.origin.decode(row.string("origin")),
     hostApp = row.stringOrNull("hostApp"),
     text = row.string("text"),
-    outcome = Stored.outcome.decodeOrName(row.stringOrNull("outcome")),
+    outcome = Stored.outcome.decode(row.stringOrNull("outcome")),
     fixes = row.long("fixes").toInt(),
     rewordings = row.long("rewordings").toInt(),
     taken = row.long("taken").toInt(),
     status = Stored.status.decode(row.stringOrNull("status")),
 )
 
-/**
- * What an origin this build doesn't know reads as: the selection menu, where most checks
- * start. Recent shows it like any other check rather than hiding it as the tester.
- */
-internal val UNKNOWN_ORIGIN = Origin.Menu
+/** Whether a session's answer can be shown again: its last attempt came back with one. */
+internal fun SessionRecord.lastAttemptSucceeded(): Boolean = attempts.lastOrNull()?.succeeded == true
 
-/** Whether a session's verdict can be shown again: its last attempt came back with one. */
-internal fun SessionRecord.lastAttemptSucceeded(): Boolean =
-    attempts.lastOrNull()?.let { it.verdict != null && it.failure == null } == true
+/** Columns that hold numbers; every other column holds text. For writing rows out as JSON. */
+internal val INTEGER_COLUMNS = setOf(
+    "schema", "createdAt", "updatedAt", "deletedAt", "startedAt", "closedAt", "attempt", "start", "end", "decidedAt",
+)

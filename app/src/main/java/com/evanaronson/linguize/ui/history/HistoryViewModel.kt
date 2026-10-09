@@ -1,10 +1,12 @@
 package com.evanaronson.linguize.ui.history
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.evanaronson.linguize.App
 import com.evanaronson.linguize.history.SessionSummary
+import com.evanaronson.linguize.ui.forgetExports
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -27,6 +29,8 @@ data class RecentRow(val summary: SessionSummary, val appLabel: String?)
  * deleted for real once the writer has had the moment to undo. That moment belongs to
  * this view model, not to the screen, so rotating or switching to dark mode while
  * "Check deleted · Undo" shows neither deletes the row early nor loses the Undo.
+ * The pending row is also noted on disk, so a process that ends during that moment
+ * doesn't lose the deletion: the next Home deletes it.
  */
 class HistoryViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as App
@@ -38,6 +42,9 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
 
     /** Commits [pending] when no Undo is on screen to answer for it. */
     private var timer: Job? = null
+
+    /** Where [pending] is noted, until it's deleted or undone. */
+    private val prefs by lazy { application.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
 
     /** Newest first; null until the first read. */
     val recent: StateFlow<List<RecentRow>?> = combine(
@@ -52,6 +59,17 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     /** The row deleted from the list that can still be undone; null when there's none. */
     val pendingDelete: StateFlow<String?> = pending.asStateFlow()
 
+    init {
+        // A deletion that was waiting for Undo when the last process ended: that Undo is gone.
+        app.appScope.launch(Dispatchers.IO) {
+            val id = prefs.getString(PENDING_KEY, null) ?: return@launch
+            hidden.update { it + id }
+            app.history.delete(id)
+            app.forgetExports()
+            forgetPending(id)
+        }
+    }
+
     /**
      * Takes [id] off the list at once and deletes it for good unless [undoDelete] comes
      * first. A deletion still pending is committed now: there's one Undo at a time.
@@ -60,6 +78,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         commitDelete()
         hidden.update { it + id }
         pending.value = id
+        prefs.edit().putString(PENDING_KEY, id).apply()
         startTimer()
     }
 
@@ -69,6 +88,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         timer?.cancel()
         pending.value = null
         hidden.update { it - id }
+        forgetPending(id)
     }
 
     /**
@@ -80,8 +100,13 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         if (id != null && id != pendingId) return
         timer?.cancel()
         pending.value = null
-        // On the app's scope, so it happens even as the screen closes.
-        app.appScope.launch { app.history.delete(pendingId) }
+        // On the app's scope, so it happens even as the screen closes. Any export goes too,
+        // since it holds the deleted text.
+        app.appScope.launch {
+            app.history.delete(pendingId)
+            app.forgetExports()
+            forgetPending(pendingId)
+        }
     }
 
     /** Undo for [id] is on screen: the deletion waits for the writer's answer. */
@@ -100,6 +125,11 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     /** The screen is gone for good (the activity finished): nothing is left to undo with. */
     override fun onCleared() = commitDelete()
 
+    /** Drops the note of a pending deletion, unless a newer one has replaced it. */
+    private fun forgetPending(id: String) {
+        if (prefs.getString(PENDING_KEY, null) == id) prefs.edit().remove(PENDING_KEY).apply()
+    }
+
     private fun startTimer() {
         timer?.cancel()
         timer = viewModelScope.launch {
@@ -110,6 +140,10 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
 
     private companion object {
         const val LIMIT = 50
+
+        /** Recent's own preferences: only the pending deletion. */
+        const val PREFS = "recent"
+        const val PENDING_KEY = "pendingDelete"
 
         /** How long a deletion waits for Undo while no Undo is on screen; about a short snackbar's time. */
         const val UNDO_MS = 4_000L

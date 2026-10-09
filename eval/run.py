@@ -112,7 +112,9 @@ def main():
                        f"Punctuation: {case.get('punctuation', 'moderate')}\n"
                        f"Checks: {case.get('checks', 'both')}\n"
                        "Native: English (write meaning, assumptions and reasons in English)\n"
-                       + "".join(f"Settled: {about} → {answer}\n" for about, answer in case.get("settled", []))
+                       + "".join("Settled: " + json.dumps({"about": about, "answer": answer}, ensure_ascii=False,
+                                                         separators=(",", ":")) + "\n"
+                               for about, answer in case.get("settled", []))
                        + f"Text: {TEXT_OPEN}{case['text']}{TEXT_CLOSE}")
             verdict, elapsed = check(model, key, system, schema, message)
         except (urllib.error.URLError, KeyError, json.JSONDecodeError) as error:

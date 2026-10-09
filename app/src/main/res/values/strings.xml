@@ -6,5 +6,5 @@
     <string name="menu_auto">Linguize</string>
     <string name="menu_catalan">Catalanize</string>
     <string name="menu_castilian">Castilianize</string>
-    <string name="accessibility_description">Adds a Linguize button for apps whose selection menu doesn\'t show Linguize, such as Telegram. Tap it while typing: Linguize reads that text field only then, checks it, and writes back the changes you accept.</string>
+    <string name="accessibility_description">Adds a Linguize button for apps whose selection menu doesn\'t show Linguize, such as Telegram. Tap it while typing: Linguize reads that text field only then, checks it, and writes back the changes you accept. Fields for passwords, codes, numbers and email addresses are never read.</string>
 </resources>

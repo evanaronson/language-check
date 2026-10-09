@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.evanaronson.linguize.App
+import com.evanaronson.linguize.CheckContext
 import com.evanaronson.linguize.Checked
 import com.evanaronson.linguize.Checker
 import com.evanaronson.linguize.core.CheckResult
@@ -42,9 +43,10 @@ sealed interface CardState {
  * settings) wherever the new suggestions are the same.
  *
  * History is [CheckHistory]'s job; this only tells it what happens. A session is opened
- * with each fresh [check], gets an attempt per answer, and is closed by [dismiss], the
- * next [check] or the view model going away. [onCleared] closes it as not applied: a
- * host that hands the text back calls `dismiss(applied = true)` itself before finishing.
+ * with each fresh [check] (and by a [recheck] whose settings differ from the session's),
+ * gets an attempt per answer, and is closed by [dismiss], the next [check] or the view
+ * model going away. [onCleared] closes it as not applied: a host that hands the text back
+ * calls `dismiss(applied = true)` itself before finishing.
  */
 class CheckViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as App
@@ -91,10 +93,8 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
         run(fresh = true)
     }
 
-    /** Checks the same text again, e.g. after settings changed, keeping answers and accepted changes. */
+    /** Checks the same text again (a retry, or after settings changed), keeping answers and accepted changes. */
     fun recheck() = run(fresh = false)
-
-    fun retry() = run(fresh = false)
 
     /** Overrides an assumption with the writer's [answer] and checks again. */
     fun settle(about: String, answer: String) {
@@ -122,19 +122,12 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
                 val checker = withContext(Dispatchers.Default) { app.checker }
                 val context = checker.context()
                 val ask: suspend () -> Checked = { checker.check(text, language, answers, context) }
+                val opening = opening(context, origin, hostApp, language)
                 val answer = if (fresh) {
-                    val opening = Opening(
-                        origin = origin,
-                        hostApp = hostApp,
-                        requestedLanguage = language?.name,
-                        punctuation = context.punctuation,
-                        judgments = context.judgments,
-                        provider = context.provider,
-                        model = context.model,
-                        promptHash = context.promptHash,
-                    )
-                    history.firstAttempt(text, opening, ask) { kept -> checker.reuse(text, language, kept.verdict, context) }
+                    history.firstAttempt(text, opening, ask) { kept -> checker.reuse(text, language, kept.raw, context) }
                 } else {
+                    // If settings changed while the card was up, the answer goes in a new session.
+                    history.recheck(text, opening)
                     Answer(ask(), null)
                 }
                 answer.reused?.let {
@@ -147,10 +140,10 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     result
                 }
-                history.succeeded(answers, answer.value.verdict, kept, reusedFrom = answer.reused?.sessionId)
+                history.succeeded(answers, answer.value.raw, kept, reusedFrom = answer.reused?.sessionId)
                 CardState.Done(kept, answers)
             } catch (failure: CheckFailure) {
-                history.failed(answers, failure.reason.name, failure.detail)
+                history.failed(answers, failure.reason.name, failure.detail, failure.raw)
                 CardState.Failed(failure.reason, failure.detail)
             }
             state = shown
@@ -172,17 +165,33 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Closes the card. [applied] says whether its accepted changes went back to the text:
-     * pass true only when the host really hands [workingText] back.
+     * pass true only when the host really hands [workingText] back. A host whose process
+     * may end as soon as it finishes passes [waitMs], to block that long at most until the
+     * session's close is written (see [CheckHistory.awaitWrites]).
      */
-    fun dismiss(applied: Boolean = true) {
+    fun dismiss(applied: Boolean = true, waitMs: Long = 0) {
         history.close(finalText = if (applied) workingText else null)
         job?.cancel()
         carried = emptyList()
         state = null
+        if (waitMs > 0) history.awaitWrites(waitMs)
     }
 
     /** Gone without [dismiss]: nothing was handed back. */
     override fun onCleared() = history.close(finalText = null)
+
+    /** What a session records about a check of the current text with [context]. */
+    private fun opening(context: CheckContext, origin: Origin, hostApp: String?, language: Language?) = Opening(
+        origin = origin,
+        hostApp = hostApp,
+        requestedLanguage = language?.name,
+        nativeLanguage = context.native,
+        punctuation = context.punctuation,
+        judgments = context.judgments,
+        provider = context.provider,
+        model = context.model,
+        promptHash = context.promptHash,
+    )
 
     private val reviewed get() = (state as? CardState.Done)?.result as? CheckResult.Reviewed
 

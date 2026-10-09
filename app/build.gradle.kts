@@ -19,22 +19,8 @@ android {
         versionName = "0.1.$versionCode"
     }
 
-    // Release builds are signed with a key that lives only in GitHub Actions secrets, so each
-    // build installs over the previous one and nobody else can sign an "update". Local builds
-    // (no SIGNING_* variables) fall back to the debug key so assembleRelease still works.
-    val releaseKeystore = providers.environmentVariable("SIGNING_KEYSTORE_PATH").orNull
-    signingConfigs {
-        if (releaseKeystore != null) {
-            create("release") {
-                storeFile = file(releaseKeystore)
-                storeType = "pkcs12"
-                storePassword = providers.environmentVariable("SIGNING_STORE_PASSWORD").get()
-                keyAlias = providers.environmentVariable("SIGNING_KEY_ALIAS").get()
-                keyPassword = providers.environmentVariable("SIGNING_KEY_PASSWORD").get()
-            }
-        }
-    }
-
+    // Release builds come out unsigned. CI signs the APK afterwards, in a separate job that runs
+    // only apksigner, so neither Gradle nor any build dependency ever sees the release key.
     buildTypes {
         release {
             // Shrunk release builds start noticeably faster than debug builds,
@@ -42,7 +28,11 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // For trying a release build on a phone: ./gradlew assembleRelease -PdebugSignedRelease
+            // signs it with the local debug key instead.
+            if (providers.gradleProperty("debugSignedRelease").isPresent) {
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
 

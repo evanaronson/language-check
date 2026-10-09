@@ -1,6 +1,5 @@
 package com.evanaronson.linguize.llm
 
-import com.evanaronson.linguize.core.Verdict
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -24,7 +23,7 @@ class GeminiClient(private val http: OkHttpClient, private val prompt: Prompt) :
     /** Models that rejected the minimal thinking level; they get their default instead. */
     private val noMinimalThinking = ConcurrentHashMap.newKeySet<String>()
 
-    override suspend fun check(key: String, model: String, request: CheckRequest): Verdict {
+    override suspend fun check(key: String, model: String, request: CheckRequest): ModelAnswer {
         // One time limit for the whole check, the retry without minimal thinking included.
         val deadline = Deadline(http)
         var minimal = model !in noMinimalThinking
@@ -41,7 +40,7 @@ class GeminiClient(private val http: OkHttpClient, private val prompt: Prompt) :
                 continue
             }
             if (code != 200) throw failure(code, payload)
-            return prompt.parseVerdict(answer(payload))
+            return prompt.read(answer(payload))
         }
     }
 
@@ -49,14 +48,17 @@ class GeminiClient(private val http: OkHttpClient, private val prompt: Prompt) :
         val ids = mutableListOf<String>()
         val deadline = Deadline(http)
         var pageToken: String? = null
-        do {
+        val seenTokens = mutableSetOf<String>()
+        // At most MAX_MODEL_PAGES pages, and a token seen before ends the list: a server that
+        // keeps sending a next page can't keep this loop going until the deadline.
+        for (pageNumber in 1..MAX_MODEL_PAGES) {
             val url = "$BASE/models".toHttpUrl().newBuilder()
                 .addQueryParameter("pageSize", "1000")
                 .apply { pageToken?.let { addQueryParameter("pageToken", it) } }
                 .build()
             val (code, payload) = deadline.send(Request.Builder().url(url).header("x-goog-api-key", key).build())
             if (code != 200) throw failure(code, payload)
-            pageToken = readResponse(payload) { page ->
+            val next = readResponse(payload) { page ->
                 for (model in page["models"]?.jsonArray.orEmpty().map { it.jsonObject }) {
                     val id = model["name"]?.jsonPrimitive?.content?.removePrefix("models/") ?: continue
                     val methods = model["supportedGenerationMethods"]?.jsonArray.orEmpty().map { it.jsonPrimitive.content }
@@ -64,7 +66,9 @@ class GeminiClient(private val http: OkHttpClient, private val prompt: Prompt) :
                 }
                 page["nextPageToken"]?.jsonPrimitive?.content?.takeIf { it.isNotEmpty() }
             }
-        } while (pageToken != null)
+            if (next == null || !seenTokens.add(next)) break
+            pageToken = next
+        }
         return textModels(ids)
     }
 
@@ -91,6 +95,9 @@ class GeminiClient(private val http: OkHttpClient, private val prompt: Prompt) :
 
     internal companion object {
         const val BASE = "https://generativelanguage.googleapis.com/v1beta"
+
+        /** Pages of models read at most; one page of 1000 holds them all today. */
+        const val MAX_MODEL_PAGES = 10
 
         /** The answer text, without any thought parts. Throws [CheckFailure]; TooLong when it was cut off. */
         fun answer(payload: String): String = readResponse(payload) { root ->

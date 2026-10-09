@@ -21,7 +21,7 @@ internal fun relativeDate(at: Long, now: Long, time: DateTimeFormatter, zone: Zo
 }
 
 /** Where the text came from: the app's name, "Try it" for the tester, or null when unknown. */
-internal fun source(origin: Origin, appLabel: String?): String? = if (origin == Origin.Tester) "Try it" else appLabel
+internal fun source(origin: Origin?, appLabel: String?): String? = if (origin == Origin.Tester) "Try it" else appLabel
 
 /** The first line with something on it, for a one-glance preview. */
 internal fun firstLine(text: String): String = text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }.orEmpty()

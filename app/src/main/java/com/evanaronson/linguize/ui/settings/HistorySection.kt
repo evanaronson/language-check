@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.evanaronson.linguize.ui.components.SectionTitle
 import com.evanaronson.linguize.ui.components.shortDate
 
@@ -53,12 +55,15 @@ internal fun HistorySection(state: SettingsState, settings: SettingsViewModel) {
         ) { Text("Export") }
     }
 
-    // Offered from this composition, so from the activity on screen now.
+    // Offered from this composition, so from the activity on screen now, and only once it's
+    // in front: an export that finishes while the app is in the background waits, and is
+    // dropped if that wait was more than a moment (see SettingsViewModel.takeExport).
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
+    val inFront = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
     val exported = settings.exported
-    LaunchedEffect(exported) {
-        if (exported == null) return@LaunchedEffect
-        settings.exportOffered()
-        share(context, exported)
+    LaunchedEffect(exported, inFront) {
+        if (exported == null || !inFront) return@LaunchedEffect
+        settings.takeExport()?.let { share(context, it) }
     }
 
     if (confirmingClear) {

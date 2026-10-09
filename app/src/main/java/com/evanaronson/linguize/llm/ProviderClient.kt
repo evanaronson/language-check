@@ -19,13 +19,23 @@ data class CheckRequest(
     val native: String = "English",
 )
 
-/** One provider's API. Every client sends the same [Prompt] and returns the same [Verdict]. */
+/** The model's answer: [raw], the text exactly as it came back, and the [verdict] read from it. */
+data class ModelAnswer(val verdict: Verdict, val raw: String)
+
+/** One provider's API. Every client sends the same [Prompt] and returns the same [ModelAnswer]. */
 interface ProviderClient {
-    /** Throws [CheckFailure]. */
-    suspend fun check(key: String, model: String, request: CheckRequest): Verdict
+    /** Throws [CheckFailure]; one about an answer that couldn't be read carries it as [CheckFailure.raw]. */
+    suspend fun check(key: String, model: String, request: CheckRequest): ModelAnswer
 
     /** Models this key can use for checks, newest first. Throws [CheckFailure]. */
     suspend fun models(key: String): List<String>
+}
+
+/** [raw] read as a verdict, kept alongside it; a failure to read it keeps it too. */
+internal fun Prompt.read(raw: String): ModelAnswer = try {
+    ModelAnswer(parseVerdict(raw), raw)
+} catch (e: CheckFailure) {
+    throw CheckFailure(e.reason, e.detail, e.cause ?: e, raw = raw)
 }
 
 /** Drops models built for other jobs (speech, images, embeddings…) and sorts the rest newest first. */

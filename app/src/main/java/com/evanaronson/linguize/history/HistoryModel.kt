@@ -1,6 +1,7 @@
 package com.evanaronson.linguize.history
 
 import com.evanaronson.linguize.core.EditKind
+import com.evanaronson.linguize.core.Settled
 import com.evanaronson.linguize.core.Verdict
 import kotlinx.serialization.Serializable
 
@@ -11,7 +12,8 @@ import kotlinx.serialization.Serializable
  * without translation. See docs/history-spec.md.
  *
  * Enums are kept as the lowercase tokens in [Stored], the same in the database and the
- * export, and read leniently: see [Tokens].
+ * export, and read leniently: see [Tokens]. The export is written from the rows
+ * themselves, so a token this build doesn't know travels unchanged.
  */
 
 /** Where a check was started. */
@@ -71,11 +73,17 @@ data class SessionRecord(
     val startedAt: Long,
     /** Null while the card is open. */
     val closedAt: Long? = null,
-    val origin: Origin,
+    /** Null only when read from a row whose origin this build doesn't know. */
+    val origin: Origin?,
     /** Package name of the app the text came from; null when unknown or for the tester. */
     val hostApp: String? = null,
     /** The language the writer asked for, by name; null for auto-detect. */
     val requestedLanguage: String? = null,
+    /**
+     * The writer's own language, which the meaning and reasons were asked in; null for
+     * sessions recorded before it was kept.
+     */
+    val nativeLanguage: String? = null,
     /** The text that was checked. */
     val text: String,
     /** Short hash of [text], to find the same text checked again. */
@@ -92,7 +100,7 @@ data class SessionRecord(
     /** Hash of the system prompt and schema, so verdicts from different prompts aren't compared as equal. */
     val promptHash: String,
     val appVersion: String,
-    /** Every request made for this text, oldest first. */
+    /** Every request made for this text with these settings, oldest first. */
     val attempts: List<Attempt> = emptyList(),
     /** What the text means, from the last successful attempt. */
     val meaning: String? = null,
@@ -103,10 +111,12 @@ data class SessionRecord(
     val status: Verdict.Status? = null,
 ) {
     /** What another check must match to show this one's verdict again. */
-    val reuseKey: ReuseKey get() = ReuseKey(textHash, requestedLanguage, punctuation, judgments, provider, model, promptHash)
+    val reuseKey: ReuseKey
+        get() = ReuseKey(textHash, requestedLanguage, nativeLanguage, punctuation, judgments, provider, model, promptHash)
 
     companion object {
-        const val SCHEMA = 1
+        /** 2: `nativeLanguage`; an attempt's answer is `raw`, the model's own text. */
+        const val SCHEMA = 2
     }
 }
 
@@ -115,21 +125,25 @@ data class SessionRecord(
 data class Attempt(
     val at: Long,
     /** The writer's answers to assumptions sent with this request. */
-    val settled: List<SettledAnswer> = emptyList(),
-    /** The model's answer exactly as it came back (JSON); null when the attempt failed. */
-    val verdict: String? = null,
+    val settled: List<Settled> = emptyList(),
+    /**
+     * The model's answer exactly as it came back, before it was read: normally the JSON the
+     * schema asks for, but kept as well when it couldn't be read (a `BadResponse` failure).
+     * Null when no answer came (offline, a refused key, a cut-off answer, ...).
+     */
+    val raw: String? = null,
     /** `CheckFailure.Reason` name, when the attempt failed. */
     val failure: String? = null,
     val failureDetail: String? = null,
     /**
-     * The session whose kept verdict was shown again instead of asking the model; null
+     * The session whose kept answer was shown again instead of asking the model; null
      * when the model was asked.
      */
     val reusedFrom: String? = null,
-)
-
-@Serializable
-data class SettledAnswer(val about: String, val answer: String)
+) {
+    /** Whether a verdict came back and was read: the card showed it. */
+    val succeeded: Boolean get() = failure == null && raw != null
+}
 
 /** One suggestion the writer saw, and what they did with it. */
 @Serializable
@@ -159,6 +173,7 @@ data class SuggestionRecord(
 data class ReuseKey(
     val textHash: String,
     val requestedLanguage: String?,
+    val nativeLanguage: String?,
     val punctuation: String,
     val judgments: String,
     val provider: String,
@@ -170,7 +185,8 @@ data class ReuseKey(
 data class SessionSummary(
     val id: String,
     val startedAt: Long,
-    val origin: Origin,
+    /** Null when it's one this build doesn't know. */
+    val origin: Origin?,
     val hostApp: String?,
     /** The start of the text checked, at most [TEXT_PREFIX] characters. */
     val text: String,
@@ -188,6 +204,18 @@ data class SessionSummary(
     }
 }
 
-/** A session with its suggestions, for the detail view and export. */
+/** A session with its suggestions, for the detail view; one line of the export has its shape. */
 @Serializable
-data class SessionDetail(val session: SessionRecord, val suggestions: List<SuggestionRecord>)
+data class SessionDetail(val session: SessionRecord, val suggestions: List<SuggestionRecord>) {
+    /**
+     * The attempt the session's card ended on, whose answer is shown again (on its page, or
+     * reused by a later check): the one the decided suggestions came from (those not
+     * [Decision.Superseded]), or else the last attempt that succeeded. Null when none did.
+     * The one place that decides it.
+     */
+    fun decidedAttempt(): Int? {
+        val succeeded = session.attempts.indices.filter { session.attempts[it].succeeded }
+        val decided = suggestions.filter { it.decision != Decision.Superseded }.maxOfOrNull { it.attempt }
+        return decided?.takeIf { it in succeeded } ?: succeeded.lastOrNull()
+    }
+}

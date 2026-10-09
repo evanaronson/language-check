@@ -101,6 +101,7 @@ val Reason.title: String
         Reason.Server -> "The model isn't responding"
         Reason.BadResponse -> "Couldn't read the answer"
         Reason.TooLong -> "Selection too long"
+        Reason.TooMany -> "Too many checks"
     }
 
 /** What to do about it, when there's something to say. */
@@ -110,6 +111,7 @@ private val Reason.hint: String?
         Reason.BadModel -> "Pick another in settings"
         Reason.RateLimited -> "Try again in a moment"
         Reason.TooLong -> "Select up to about a page of text"
+        Reason.TooMany -> "Wait a minute, then select the text again"
         else -> null
     }
 
@@ -130,7 +132,8 @@ private fun Failure(reason: Reason, providerMessage: String?, actions: CardActio
     when (reason) {
         Reason.NoKey, Reason.BadKey, Reason.BadModel ->
             actions.onOpenSettings?.let { FilledTonalButton(onClick = it) { Text("Open settings") } }
-        Reason.TooLong -> Unit
+        // Nothing to retry: a limited card never started a check.
+        Reason.TooLong, Reason.TooMany -> Unit
         else -> FilledTonalButton(onClick = actions.onRetry) { Text("Retry") }
     }
 }
