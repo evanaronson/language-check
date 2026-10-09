@@ -2,6 +2,18 @@
 
 Status: proposal, not built. Branch `feature/history`.
 
+## Decisions (9 Oct)
+
+| Question | Decision | Consequence |
+|---|---|---|
+| Who reads it, where | On the phone first; a server later | Rows are upload-ready; no client-side encryption the server couldn't undo |
+| Feeds back into checks? | No. A writer profile is premature | Checks stay stateless; history is write-only until insights |
+| Full text or corrections only | Full text, keep everything | `text`, `finalText`, `meaning` and raw verdicts are stored |
+| Second platform | Not a consideration for this feature | Room; data classes stay Android-free anyway |
+| Categories | Tag at check time, keep raw verdicts for re-tagging | Taxonomy v1 in the prompt; rewordings tagged too |
+| Raw data access | Should be available | Export in v1 |
+| Other users | Possibly friends, not public | On by default, plainly worded; consent moment designed before friends install |
+
 Linguize remembers every check and what came of it, on the phone, so that later it can tell you the kinds of mistakes you tend to make. This document is the analysis and the spec for the recording half. The insight half ("you drop accents on verb endings") is a later feature that can't exist until there is history to read.
 
 ## The problem
@@ -154,40 +166,64 @@ The eval script and its cases get the new fields; the prompt's examples get `lan
 
 ## UX
 
-The feature's visible surface should be as small as the app's: one quiet place that says what's kept, with the controls next to it. No onboarding, no banner on the card.
+### Where history lives
 
-### Settings · History (v1)
+The first instinct is a small history button on the card, next to the language picker and the settings gear, opening the list inside the card. The argument for it is real: the card is where the writer is 95% of the time, and a past check should look the way it looked the first time. The second half of that is right and the first half is a trap.
 
-A fifth section on the settings screen:
+**The card is a moment, not a place.** It lives for a few seconds between "did I write this right" and send, over someone else's app, usually with the keyboard up. Everything on it competes with the two controls that matter (Replace, Done). History is reflective: you read it when you're not writing to anyone. Putting a diary behind a button on the thing that has to feel like spellcheck adds a third job to a surface that's good because it has one.
+
+Two smaller problems: that header (picker + gear) only exists on the accessibility overlay. The selection-menu card, which is most checks, has no header, so a history button there means adding chrome to the fastest path. And there's no action to take on a past check from inside the card except reading it.
+
+**What the instinct gets right:** a past check should be rendered with the card's own content (`ReviewContent`, the highlights, the reasons, what was taken), not as a settings-style form. The tester already proves the card's content works inside a full-screen page. So the detail view reuses the component, wherever it lives.
+
+**History should reach the card as data, never as navigation.** The in-the-moment uses of history don't need a button:
+
+- *Instant re-open.* Checking the same text again within a few minutes (closed by accident, app lost the card) reuses the stored verdict: no model call, no wait. Free, invisible, and the first thing that makes the recording pay.
+- *"You've had this fix before."* Once categories exist, a fix on the card can carry one quiet line ("4th time this month"). That's the insight feature arriving in-situ. Later; noted here so the data supports it (it does: `textHash`, `category`, `fromText`).
+
+### The launcher screen becomes Home
+
+Today the launcher screen is Settings with a tester at the bottom. The tester and history are the same thing, checks, at different times: "check something now" above "what you checked before". So:
+
+**Home**
+> lingu·ize                                   ⚙
+> [ text box ]  Linguize ▾
+> (the result card, when a check is running)
+> Recent
+> ▸ 9 Oct · WhatsApp · "Hola bebé, estoy en casa…" · 3 fixes · 2 taken
+> ▸ 9 Oct · Telegram · "Com estàs amb la pluja?" · looks good
+> …
+
+- Tap a row: the check opens below it or on a page, rendered with the card's content, read-only, with Copy. Delete from there.
+- Insights, later, are a strip between the text box and the list. They don't need a new screen either.
+- The gear (top right) opens **Settings**: the existing Checking, Model and Apps-without-the-menu sections, plus a History section (toggle, count, Clear, Export). Browsing lives on Home; controls live in Settings.
+- Two screens, a `BackHandler` and a `screen` state in the activity. No navigation library until there's a third.
+- The overlay's gear keeps opening the same activity.
+
+Design debt this removes: the app's most interesting content was heading for a settings section, and the launcher screen was going to need splitting anyway when insights arrived. Doing it now is one move instead of two, and it's mostly moving sections that already exist.
+
+### If a compact entry is ever wanted
+
+The glyph is Material's `history`: a clock with a counter-clockwise arrow. It's the one shape browsers and Google's apps all use for "what I did before", so it reads without a label; a plain clock means scheduling. The recommended design doesn't need it, because Home *is* history. If it's wanted on the overlay header later, it sits between the picker and the gear and opens Home.
+
+### Settings · History
 
 > **History**
 > ☑ Remember what I check
 > Kept on this phone only, so Linguize can later show you the mistakes you tend to make. Turning this off keeps what's already here.
 > 312 checks since 9 Oct · **Clear** · **Export**
 
-- *Remember* is on by default (see questions). Off stops recording; it doesn't delete.
-- *Clear* asks once, then deletes everything (hard delete locally; soft-delete semantics only matter once sync exists).
-- *Export* writes a JSON Lines file (one session per line, suggestions nested) and offers it through the share sheet. It's the cheapest way to see that the recording is right, and it's the sync payload in disguise.
-
-### History list (v1.5)
-
-The "312 checks" line becomes tappable and opens a page, the same drill-in pattern the card already uses for Meaning and Assumptions: a list of checks, newest first (date, the app it came from, the first line of text, "3 fixes · 1 rewording · 2 taken"), tap for the detail (the text with its highlights and what was done with each), swipe or button to delete one.
-
-This is the first second screen in the app. Do it with a `BackHandler` and a `screen` state in `SettingsActivity`, not a navigation library. A library is worth it at the third screen, not the second.
-
-### Design debt to see coming
-
-When insights arrive, they're the app's most interesting screen and they don't belong inside settings. The launcher screen will want to become *Home* (insights, then Try it) with Settings secondary. Nothing in v1 should fight that: the History section is a settings section about a setting, and the list is reachable from it, but the list's layout (a list of checks with a detail page) is what the Home screen's "recent" will reuse. Don't build the list as a settings-styled form.
-
-The card itself doesn't change. The one temptation is a "saved" indicator on the card; resist it. Recording is spellcheck-grade invisible, like the rest of the app.
+- *Remember* is on by default. Off stops recording; it doesn't delete.
+- *Clear* asks once, then deletes everything.
+- *Export* writes a JSON Lines file (one session per line, suggestions nested) and offers it through the share sheet. It's the sync payload in disguise, and the way to look at the raw data in a notebook.
 
 ### Privacy, stated plainly
 
 - Nothing leaves the phone. The data extraction rules already exclude the app from backups and device transfer, so history doesn't land in Google's cloud.
-- The tester's sample text is recorded like any other check, tagged `origin = tester`, and the insight feature excludes it by default. Recording it keeps "what gets recorded" simple to explain: everything you check.
-- Failed checks are recorded (they're half the reliability story) and hidden from the list by default.
+- The tester's text is recorded like any other check, tagged `origin = tester`, and the insight feature excludes it by default. "Everything you check" is simple to explain; exceptions aren't.
+- Failed checks are recorded (half the reliability story) and hidden from Recent by default.
 - Read-only selections are recorded; their suggestions can only end as `copied` or `ignored`.
-- Column encryption with the existing Keystore key is possible (same code as `ApiKeys`) and costs: no SQL over text, slower lists, more code. The sandbox plus backup exclusion is the right level for a sideloaded personal app. Revisit before the app is public.
+- Column encryption with the existing Keystore key is possible and costs: no SQL over text, slower lists, more code, and a server couldn't read it. The sandbox plus backup exclusion is the right level while the app is personal or among friends. Before friends install: the History section's wording is the consent, and recording should be shown once (a line on Home the first time), not assumed.
 
 ## Requirements
 
@@ -198,7 +234,10 @@ The card itself doesn't change. The one temptation is a "saved" indicator on the
 - [ ] `HistoryRecorder` (pure Kotlin) with tests for every decision and outcome in the tables above, including: undo after accept, rewording retiring a fix, Copy, re-check superseding, a failed attempt, close with nothing.
 - [ ] `CheckViewModel` reports to the recorder; `check()` takes an `origin`; the three hosts pass it.
 - [ ] Open sessions found on process start are marked `abandoned`.
-- [ ] Settings · History section: toggle, count, Clear.
+- [ ] Launcher screen split into Home (text box, result card, Recent list) and Settings (gear); `BackHandler`, no nav library.
+- [ ] Recent list on Home, newest first; tap opens the check rendered with the card's content; delete one.
+- [ ] Settings · History section: toggle, count, Clear, Export (JSON Lines via the share sheet).
+- [ ] Same text checked again within 10 minutes reuses the stored verdict instead of calling the model.
 - [ ] Card latency unchanged: no history work on the path between tapping Linguize and the request leaving.
 - [ ] `App` gains an application scope; the close write uses it.
 
@@ -212,13 +251,12 @@ Acceptance, the ones worth spelling out:
 
 ### Should have (v1.5)
 
-- [ ] Export (JSON Lines via the share sheet).
-- [ ] History list and detail page; delete one.
-- [ ] `hostApp` recorded (menu: `callingPackage`; button: the field's package).
+- [ ] `hostApp` recorded (menu: `callingPackage`; button: the field's package) and shown in Recent.
+- [ ] Recent hides failed checks and the tester by default, with a way to show them.
 
 ### Later (designed for, not built)
 
-- Insights: aggregate `suggestions` by `category × language × decision × week`.
+- Insights: aggregate `suggestions` by `category × language × decision × week`, shown as a strip on Home; "you've had this fix before" on the card.
 - Sync: `syncState` table, uploader, opt-in separate from this one.
 - Encrypt text columns before a public release.
 
@@ -240,21 +278,13 @@ Debt that the design cannot remove and that is worth naming: the taxonomy. Twelv
 
 ## Open questions
 
-Decisions for the founder:
-
-1. **On by default, or opt-in?** Recommendation: on, with the section visible, while the app is personal. Flip to opt-in (or a one-time line in settings) before anyone else installs it.
-2. **Is the taxonomy right?** The 12 categories above are the one decision that gets expensive to change.
-3. **Record `hostApp`?** Cheap, useful for debugging write-back problems and for filtering the list; it's also the one piece of metadata a reader could find surprising ("it knows I was in WhatsApp"). Recommendation: record it.
-4. **Export in v1?** It's the only way to verify the recording without the list. Recommendation: yes if the share-sheet plumbing (a `FileProvider`) stays under an hour; otherwise v1.5.
-
-For engineering, non-blocking:
-
-- Room/KSP under this build chain (spike first).
-- Whether `attempts` JSON should cap the raw verdict size (a 3,000-character text twice over plus lists is ~15 KB; fine, but confirm).
+- Home-first (above) or the original idea (a settings section plus a history button on the card)? The spec argues for Home-first; it's the founder's call.
+- Room/KSP under this build chain (spike first; non-blocking).
+- Whether the raw verdict in `attempts` needs a size cap (a 3,000-character text twice over plus lists is ~15 KB; fine, but confirm).
 
 ## Phasing
 
 0. Prompt: `language`, `category`, examples, eval. Ship on its own; it's visible nowhere and de-risks the rest.
-1. Record: store, recorder, view-model hook, settings section. Ship. Let it run.
-2. See: export, list, detail, delete-one.
+1. Record: store, recorder, view-model hook; Home/Settings split with the Recent list and the History section; export. Ship. Let it run.
+2. Host app in Recent; filters; instant re-open polish.
 3. Insights: a separate spec, written once there are a few hundred fixes to look at.
