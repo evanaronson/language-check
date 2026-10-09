@@ -25,6 +25,16 @@ class Settings(private val context: Context) {
         get() = read(JUDGMENTS, Judgments.Both)
         set(value) = write(JUDGMENTS, value.name)
 
+    /** Whether checks are kept in history. Turning it off keeps what's already there. */
+    var historyEnabled: Boolean
+        get() = prefs.getBoolean(HISTORY, true)
+        set(value) = prefs.edit().putBoolean(HISTORY, value).apply()
+
+    /** A random id made once per install, so history rows from several phones can merge later. */
+    val deviceId: String
+        get() = prefs.getString(DEVICE_ID, null)
+            ?: java.util.UUID.randomUUID().toString().also { prefs.edit().putString(DEVICE_ID, it).apply() }
+
     /** The writer's own language: the app's UI language, which the meaning and reasons are written in. */
     val nativeLanguage: String
         get() = context.getString(R.string.native_language)
@@ -49,5 +59,7 @@ class Settings(private val context: Context) {
         const val PROVIDER = "provider"
         const val PUNCTUATION = "punctuation"
         const val JUDGMENTS = "judgments"
+        const val HISTORY = "history"
+        const val DEVICE_ID = "deviceId"
     }
 }
