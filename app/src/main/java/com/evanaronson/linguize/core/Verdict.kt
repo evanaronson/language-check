@@ -7,6 +7,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Verdict(
     val status: Status,
+    /** The language the model judged the text as, in English ("Catalan"); empty when unclear. */
+    val language: String = "",
     /** What the writer means, in their native language. */
     val meaning: String = "",
     /** Readings of ambiguous parts that the fixes and rewordings rely on; usually none. */

@@ -54,7 +54,11 @@ fun ResultCard(
                         is CheckResult.Reviewed -> ReviewContent(result, state.settled, actions)
                         CheckResult.Unclear -> Outcome(Mark.Unsure, "Can't tell what this means")
                         is CheckResult.WrongLanguage ->
-                            Outcome(Mark.Unsure, "Not ${result.expected}", "Try Linguize to detect the language")
+                            Outcome(
+                                Mark.Unsure,
+                                "Not ${result.expected}",
+                                result.found?.let { "This looks like $it" } ?: "Try Linguize to detect the language",
+                            )
                     }
                 }
             }

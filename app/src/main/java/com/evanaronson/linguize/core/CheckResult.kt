@@ -5,8 +5,8 @@ sealed interface CheckResult {
     /** The model couldn't tell what the text means. */
     data object Unclear : CheckResult
 
-    /** The text isn't in the language chosen in settings. */
-    data class WrongLanguage(val expected: String) : CheckResult
+    /** The text isn't in the language chosen in settings; [found] is what the model took it for. */
+    data class WrongLanguage(val expected: String, val found: String? = null) : CheckResult
 
     /** Suggestions for the judgments that were asked for, in display order. */
     data class Reviewed(
@@ -39,7 +39,7 @@ fun interpret(
     when (verdict.status) {
         Verdict.Status.Unclear -> return CheckResult.Unclear
         Verdict.Status.WrongLanguage ->
-            return expectedLanguage?.let { CheckResult.WrongLanguage(it) } ?: CheckResult.Unclear
+            return expectedLanguage?.let { CheckResult.WrongLanguage(it, verdict.language.trim().ifEmpty { null }) } ?: CheckResult.Unclear
         Verdict.Status.Ok -> Unit
     }
 

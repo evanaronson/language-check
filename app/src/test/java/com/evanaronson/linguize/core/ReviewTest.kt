@@ -356,6 +356,15 @@ class ReviewTest {
             CheckResult.WrongLanguage("Catalan"),
             interpret("x", Verdict(status = Verdict.Status.WrongLanguage), expectedLanguage = "Catalan"),
         )
+        // What the model found travels with it; blank means unknown.
+        assertEquals(
+            CheckResult.WrongLanguage("Catalan", found = "Spanish"),
+            interpret(
+                "x",
+                Verdict(status = Verdict.Status.WrongLanguage, language = "Spanish"),
+                expectedLanguage = "Catalan",
+            ),
+        )
         // Without a chosen language there's nothing to be wrong about.
         assertEquals(CheckResult.Unclear, interpret("x", Verdict(status = Verdict.Status.WrongLanguage)))
     }

@@ -7,7 +7,8 @@ judgment mismatches and latency.
 
 Each case may set "language" (as the app's language setting names it; default
 auto), "punctuation" (strict, moderate or casual; default moderate), "checks"
-(both, fix or naturalize; default both), "status", "fix" (a correction is expected or not) and "natural" (a more
+(both, fix or naturalize; default both), "status", "answer_language" (the English name the model should give in
+its `language` field; empty for unclear), "fix" (a correction is expected or not) and "natural" (a more
 natural alternative is expected or not) and "max_fixes" (more fixes than this
 means style is being counted as errors) "min_sentences" (fewer means
 run-ons were left alone), "assumption" (whether any assumption should be listed)
@@ -118,6 +119,8 @@ def main():
         problems = []
         if "status" in case and verdict["status"] != case["status"]:
             problems.append(f"status {verdict['status']} != {case['status']}")
+        if "answer_language" in case and verdict.get("language", "") != case["answer_language"]:
+            problems.append(f"language {verdict.get('language', '')!r} != {case['answer_language']!r}")
         if "fix" in case and verdict["has_errors"] != case["fix"]:
             problems.append(f"fix {verdict['has_errors']} != {case['fix']}")
         if "natural" in case and verdict["more_natural"] != case["natural"]:
@@ -132,7 +135,7 @@ def main():
             problems.append(f"{len(verdict['fixes'])} fixes > {case['max_fixes']} (style counted as errors?)")
         failures += bool(problems)
         mark = "MISS " if problems else "ok   "
-        print(f"{mark}{elapsed:4.1f}s  {case['text']}")
+        print(f"{mark}{elapsed:4.1f}s  {case['text']}  [{verdict.get('language', '')}]")
         for a in verdict.get("assumptions", []):
             print(f"        assumed: {a['about']}: {a['assumed']}  (or {', '.join(a['alternatives'])})")
         if verdict.get("corrected"):
