@@ -44,13 +44,19 @@ jobs:
           errors="${errors//$'\n'/'%0A'}"
           echo "::error title=Build errors::${errors}"
 
-      # Builds of other branches (run by hand) keep their APK as a run artifact instead of a release.
-      - name: Keep the APK
+      # Builds of other branches (run by hand) go up as a pre-release, which never becomes "latest".
+      - name: Publish pre-release
         if: github.ref != 'refs/heads/main'
-        uses: actions/upload-artifact@v7
-        with:
-          name: linguize-branch-${{ github.run_number }}
-          path: app/build/outputs/apk/release/app-release.apk
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk linguize-branch-${{ github.run_number }}.apk
+          gh release create "branch-${{ github.run_number }}" "linguize-branch-${{ github.run_number }}.apk" \
+            --target "${{ github.sha }}" \
+            --title "Branch build ${{ github.run_number }} ($BRANCH)" \
+            --notes "Built from $BRANCH" \
+            --prerelease --latest=false
 
       # A release gives a direct download link that works from the phone's browser. The same
       # APK goes up under a fixed name, so releases/latest/download/linguize.apk is always the newest.
