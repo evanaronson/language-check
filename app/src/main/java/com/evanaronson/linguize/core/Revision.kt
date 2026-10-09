@@ -68,6 +68,12 @@ data class Revision(
     /** The working text with all of [kind]'s remaining edits applied too, and where they sit. */
     fun preview(kind: EditKind): Rendered = render(original, applied(acceptedEdits + remaining(kind)))
 
+    /** Whether edit [id] is accepted and shows in the working text: not a fix an accepted rewording replaced. */
+    fun isApplied(id: Int) = edits.any { it.id == id && id in accepted && !retired(it) }
+
+    /** Whether edit [id] is a fix retired by an accepted rewording that touches it. */
+    fun isRetired(id: Int) = edits.any { it.id == id && retired(it) }
+
     /** A fix touched by an accepted rewording. */
     private fun retired(edit: Edit) =
         edit.kind == EditKind.Fix && edits.any { it.id in accepted && it.kind == EditKind.Natural && it.touches(edit) }
