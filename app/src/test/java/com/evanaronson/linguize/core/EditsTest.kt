@@ -87,4 +87,56 @@ class EditsTest {
         assertEquals("Com portes la pluja?", both.workingText)
         assertEquals(1, both.acceptedCount)
     }
+
+    /** Accepting everything gives [expected] in either order of kinds, and one edit at a time in any order. */
+    private fun assertAcceptingAllGives(expected: String, revision: Revision) {
+        assertEquals(expected, revision.acceptAll(EditKind.Natural).acceptAll(EditKind.Fix).workingText)
+        assertEquals(expected, revision.acceptAll(EditKind.Fix).acceptAll(EditKind.Natural).workingText)
+        val ids = revision.edits.map { it.id }
+        for (order in listOf(ids, ids.reversed())) {
+            assertEquals(expected, order.fold(revision) { r, id -> r.accept(id) }.workingText)
+        }
+    }
+
+    /** No two rewordings overlap or include the same fix. */
+    private fun assertRewordingsApart(revision: Revision) {
+        val naturals = revision.edits(EditKind.Natural)
+        for (x in naturals) for (y in naturals) {
+            if (x.id < y.id) {
+                assertTrue("$x overlaps $y", !x.overlaps(y))
+                assertTrue("$x and $y share a fix", (x.includes intersect y.includes).isEmpty())
+            }
+        }
+    }
+
+    @Test
+    fun insertionsAtOnePlaceKeepTheNaturalTextsOrderWhateverTheirKind() {
+        // A rewording inserted between two inserted fixes, past a space.
+        assertAcceptingAllGives(
+            "dijo bajito: «hola»",
+            revision("dijo hola", corrected = "dijo: «hola»", natural = "dijo bajito: «hola»"),
+        )
+        // A rewording inserted before several inserted fixes.
+        assertAcceptingAllGives("Oye, ¡¿Vale", revision("vale", corrected = "¡¿Vale", natural = "Oye, ¡¿Vale"))
+        assertAcceptingAllGives("?,:x", revision("x", corrected = ",:x", natural = "?,:x"))
+    }
+
+    @Test
+    fun rewordingsNeverIncludeTheSameFix() {
+        val inserted = revision("Oye", corrected = "bien Oye", natural = "sí bien? Oye")
+        assertRewordingsApart(inserted)
+        assertAcceptingAllGives("sí bien? Oye", inserted)
+
+        val replaced = revision("!", corrected = "E !", natural = "q E ")
+        assertRewordingsApart(replaced)
+        assertAcceptingAllGives("q E", replaced)
+    }
+
+    @Test
+    fun anInsertionMovedPastASpaceDoesntLandInsideAFix() {
+        val revision = revision("! hola", corrected = "!", natural = "! adiós")
+        assertAcceptingAllGives("! adiós", revision)
+        val fix = revision.edits(EditKind.Fix).single()
+        assertTrue(revision.edits(EditKind.Natural).none { it.overlaps(fix) })
+    }
 }

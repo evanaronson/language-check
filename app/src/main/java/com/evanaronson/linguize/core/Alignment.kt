@@ -25,29 +25,81 @@ internal object Alignment {
         val isPunct get() = a?.type == Type.Punct || b?.type == Type.Punct
     }
 
+    /**
+     * The cheapest alignment, walked back from the ends of both texts preferring a pair,
+     * then a removal. The costs it walks back over would take a table of (n + 1) × (m + 1)
+     * cells, too much memory for long texts, so only what the walk needs is kept: the
+     * tokens both texts share at their start and end need no table, and of the rest only
+     * every few rows are kept and the rows between them worked out again as the walk
+     * reaches them.
+     */
     fun align(original: String, target: String): List<Op> {
         val a = tokenize(original)
         val b = tokenize(target)
-        val n = a.size
-        val m = b.size
-        val cost = Array(n + 1) { IntArray(m + 1) }
-        for (i in 1..n) cost[i][0] = cost[i - 1][0] + gap(a[i - 1])
-        for (j in 1..m) cost[0][j] = cost[0][j - 1] + gap(b[j - 1])
-        for (i in 1..n) {
-            for (j in 1..m) {
-                var best = minOf(cost[i - 1][j] + gap(a[i - 1]), cost[i][j - 1] + gap(b[j - 1]))
-                substitution(a[i - 1], b[j - 1])?.let { best = minOf(best, cost[i - 1][j - 1] + it) }
-                cost[i][j] = best
+        // Shared tokens at the end pair first: equal tokens at the end always pair on a
+        // cheapest path, and the walk prefers a pair.
+        var suffix = 0
+        while (suffix < minOf(a.size, b.size) && a[a.size - 1 - suffix].text == b[b.size - 1 - suffix].text) suffix++
+        val n = a.size - suffix
+        val m = b.size - suffix
+        // At the start the walk can leave the shared tokens ("a a" against "a" pairs the second
+        // "a"), so it goes on into them, where costs need no table: aligning a text with one that
+        // starts with all of it only costs adding the rest.
+        var prefix = 0
+        while (prefix < minOf(n, m) && a[prefix].text == b[prefix].text) prefix++
+        val gapsA = IntArray(n + 1).also { for (k in 0 until n) it[k + 1] = it[k] + gap(a[k]) }
+        val gapsB = IntArray(m + 1).also { for (k in 0 until m) it[k + 1] = it[k] + gap(b[k]) }
+        fun shared(i: Int, j: Int) = if (j >= i) gapsB[j] - gapsB[i] else gapsA[i] - gapsA[j]
+
+        // The table covers i and j from prefix on; row r holds i = prefix + r.
+        val rows = n - prefix
+        val columns = m - prefix
+        fun fill(row: IntArray, above: IntArray, r: Int) {
+            val i = prefix + r
+            row[0] = shared(i, prefix)
+            for (c in 1..columns) {
+                val j = prefix + c
+                var best = minOf(above[c] + gap(a[i - 1]), row[c - 1] + gap(b[j - 1]))
+                substitution(a[i - 1], b[j - 1])?.let { best = minOf(best, above[c - 1] + it) }
+                row[c] = best
             }
         }
+        val step = maxOf(1, Math.ceil(Math.sqrt(rows + 1.0)).toInt())
+        val kept = arrayOfNulls<IntArray>(rows / step + 1)
+        var above = IntArray(columns + 1) { shared(prefix, prefix + it) }
+        var row = IntArray(columns + 1)
+        kept[0] = above.copyOf()
+        for (r in 1..rows) {
+            fill(row, above, r)
+            if (r % step == 0) kept[r / step] = row.copyOf()
+            above = row.also { row = above }
+        }
+        // Rows first..first + step, worked out again from the kept row at first.
+        val block = Array(step + 1) { IntArray(0) }
+        var first = -1
+        fun row(r: Int): IntArray {
+            if (first < 0 || r < first || r > first + step) {
+                first = (if (r == 0) 0 else (r - 1) / step) * step
+                block[0] = kept[first / step]!!
+                for (k in 1..minOf(step, rows - first)) {
+                    if (block[k].size != columns + 1) block[k] = IntArray(columns + 1)
+                    fill(block[k], block[k - 1], first + k)
+                }
+            }
+            return block[r - first]
+        }
+        fun cost(i: Int, j: Int): Int =
+            if (i >= prefix && j >= prefix) row(i - prefix)[j - prefix] else shared(i, j)
+
         val ops = ArrayDeque<Op>()
+        for (k in 1..suffix) ops.addFirst(Op(a[a.size - k], b[b.size - k]))
         var i = n
         var j = m
         while (i > 0 || j > 0) {
             val sub = if (i > 0 && j > 0) substitution(a[i - 1], b[j - 1]) else null
             when {
-                sub != null && cost[i][j] == cost[i - 1][j - 1] + sub -> ops.addFirst(Op(a[--i], b[--j]))
-                i > 0 && cost[i][j] == cost[i - 1][j] + gap(a[i - 1]) -> ops.addFirst(Op(a[--i], null))
+                sub != null && cost(i, j) == cost(i - 1, j - 1) + sub -> ops.addFirst(Op(a[--i], b[--j]))
+                i > 0 && cost(i, j) == cost(i - 1, j) + gap(a[i - 1]) -> ops.addFirst(Op(a[--i], null))
                 else -> ops.addFirst(Op(null, b[--j]))
             }
         }

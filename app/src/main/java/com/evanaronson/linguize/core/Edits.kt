@@ -12,14 +12,16 @@ internal object Edits {
     /** One edit per changed word and one per punctuation mark. */
     fun fixes(original: String, corrected: String, reported: List<VerdictChange>): List<Edit> {
         val spans = tidy(original, spans(original, corrected, atomic = true))
-        return toEdits(spans, reported, EditKind.Fix, firstId = 0)
+        val fixes = toEdits(spans, reported, EditKind.Fix, firstId = 0)
+        val placed = place(fixes).associateBy { it.fix.id }
+        return fixes.map { it.copy(order = 2 * placed.getValue(it.id).baseStart + 1) }
     }
 
     /**
      * Phrase-level rewordings. The natural text is written on top of the
      * corrected one, so rewordings are found against the corrected text (where
-     * the fixes cancel out) and then mapped back onto the original. A rewording
-     * that covers a fixed word takes in that word's original form.
+     * the fixes cancel out), tidied there and then mapped back onto the original.
+     * A rewording that covers a fixed word takes in that word's original form.
      */
     fun naturals(
         original: String,
@@ -30,8 +32,12 @@ internal object Edits {
     ): List<Edit> {
         val base = render(original, fixes).text
         val placed = place(fixes)
-        val inBase = located(base, natural, reported) ?: spans(base, natural, atomic = false)
-        val spans = tidy(original, mergeWithinFixes(inBase, base, placed).map { toOriginal(it, base, original, placed) })
+        // Tidied in the corrected text, so moving an insertion past a space never jumps
+        // over a fix's text, or into it.
+        val inBase = tidy(base, located(base, natural, reported) ?: spans(base, natural, atomic = false)) { at ->
+            placed.any { it.baseStart <= at && at < it.baseEnd }
+        }
+        val spans = mergeWithinFixes(inBase, base, placed).map { toOriginal(it, base, original, placed) }
             // Changes that only restate a fix, or undo one, don't change the original.
             .filter { it.from != it.replacement }
         return toEdits(spans, reported, EditKind.Natural, firstId)
@@ -45,13 +51,15 @@ internal object Edits {
         val why: String? = null,
         /** Ids of the fixes this span's replacement includes. */
         val includes: Set<Int> = emptySet(),
+        /** See [Edit.order]; only set for rewordings here, fixes get theirs once placed. */
+        val order: Int = 0,
     )
 
     private fun toEdits(spans: List<Span>, reported: List<VerdictChange>, kind: EditKind, firstId: Int): List<Edit> {
         val unused = reported.toMutableList()
         return spans.mapIndexed { index, span ->
             val why = span.why ?: bestMatch(span, unused)?.also { unused.remove(it) }?.let(::reason)
-            Edit(firstId + index, kind, span.start, span.end, span.from, span.replacement, why, span.includes)
+            Edit(firstId + index, kind, span.start, span.end, span.from, span.replacement, why, span.includes, span.order)
         }
     }
 
@@ -110,17 +118,26 @@ internal object Edits {
         }
     }
 
+    /** [start] and [end] in the corrected text, moved out to the edges of any fix's text they fall strictly inside. */
+    private fun widened(start: Int, end: Int, placed: List<Placed>): Pair<Int, Int> {
+        var from = start
+        var to = end
+        for (p in placed) {
+            if (p.baseStart < from && from < p.baseEnd) from = p.baseStart
+            if (p.baseStart < to && to < p.baseEnd) to = p.baseEnd
+        }
+        return from to to
+    }
+
     /**
-     * Joins rewordings that end and start inside the same fix: each would widen to the
-     * whole fix, so apart they would overlap.
+     * Joins rewordings that would overlap once widened to take in whole fixes, like two
+     * that end and start inside the same fix. Afterwards no two rewordings share a fix.
      */
     private fun mergeWithinFixes(spans: List<Span>, base: String, placed: List<Placed>): List<Span> {
-        fun Placed.widens(span: Span) =
-            (baseStart < span.start && span.start < baseEnd) || (baseStart < span.end && span.end < baseEnd)
         val merged = mutableListOf<Span>()
         for (span in spans.sortedBy { it.start }) {
             val last = merged.lastOrNull()
-            merged += if (last != null && placed.any { it.widens(last) && it.widens(span) }) {
+            merged += if (last != null && widened(span.start, span.end, placed).first < widened(last.start, last.end, placed).second) {
                 merged.removeAt(merged.lastIndex)
                 Span(
                     start = last.start,
@@ -139,26 +156,9 @@ internal object Edits {
     /** [span] is in corrected-text positions; the result is in original positions. */
     private fun toOriginal(span: Span, base: String, original: String, placed: List<Placed>): Span {
         // A span edge inside a fix's replacement widens to take in the whole fix.
-        var start = span.start
-        var end = span.end
-        var prefix = ""
-        var suffix = ""
-        for (p in placed) {
-            // A rewording inserted just where a fix inserts something goes before it, so it
-            // takes the inserted text in: "¿" plus "Hola, " in front becomes "Hola, ¿".
-            if (span.start == span.end && p.fix.isInsertion && p.baseStart == start && start < p.baseEnd) {
-                suffix = base.substring(start, p.baseEnd)
-                end = p.baseEnd
-            }
-            if (p.baseStart < start && start < p.baseEnd) {
-                prefix = base.substring(p.baseStart, start)
-                start = p.baseStart
-            }
-            if (p.baseStart < end && end < p.baseEnd) {
-                suffix = base.substring(end, p.baseEnd)
-                end = p.baseEnd
-            }
-        }
+        val (start, end) = widened(span.start, span.end, placed)
+        val prefix = base.substring(start, span.start)
+        val suffix = base.substring(span.end, end)
         val from = originalPosition(start, placed)
         val to = originalPosition(end, placed)
         // Fixes whose corrected text lies inside the span are part of the rewording,
@@ -167,7 +167,8 @@ internal object Edits {
             .filter { it.baseStart < it.baseEnd && start <= it.baseStart && it.baseEnd <= end }
             .map { it.fix.id }
             .toSet()
-        return Span(from, to, original.substring(from, to), prefix + span.replacement + suffix, span.why, includes)
+        val order = 2 * start + if (start < end) 1 else 0
+        return Span(from, to, original.substring(from, to), prefix + span.replacement + suffix, span.why, includes, order)
     }
 
     /** Maps a corrected-text position that isn't inside any fix to the original. */
@@ -277,16 +278,18 @@ internal object Edits {
     /**
      * Keeps spaces out of highlights ("␣estas amb" → "␣portes" becomes "estas amb" →
      * "portes") and drops changes to spacing alone, which would have nothing to show.
+     * [fixed] tells which characters of [text] a fix put there.
      */
-    private fun tidy(text: String, spans: List<Span>): List<Span> {
+    private fun tidy(text: String, spans: List<Span>, fixed: (Int) -> Boolean = { false }): List<Span> {
         val trimmed = spans.map(::trimSpaces).filterNot { it.replacement.isEmpty() && it.from.isBlank() }
         return trimmed.map { span ->
             // An inserted "␣al" before a space is the same as "al␣" after it, unless something
-            // else is inserted at the same place, which the move would jump over.
-            val alone = trimmed.none { it !== span && it.start == span.start }
+            // else is inserted at the same place, which the move would jump over, or the space
+            // belongs to another change ([fixed], or another span), which it would land inside.
+            val alone = trimmed.none { it !== span && it.start <= span.start && span.start < maxOf(it.end, it.start + 1) }
             val replacement = span.replacement
             if (alone && span.start == span.end && replacement.length > 1 && replacement[0].isWhitespace() &&
-                text.getOrNull(span.start) == replacement[0]
+                text.getOrNull(span.start) == replacement[0] && !fixed(span.start)
             ) {
                 span.copy(start = span.start + 1, end = span.end + 1, replacement = replacement.drop(1) + replacement[0])
             } else {
