@@ -13,6 +13,7 @@ import com.evanaronson.linguize.core.EditKind
 import com.evanaronson.linguize.core.Language
 import com.evanaronson.linguize.core.Revision
 import com.evanaronson.linguize.core.Settled
+import com.evanaronson.linguize.history.Origin
 import com.evanaronson.linguize.llm.CheckFailure
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -55,8 +56,11 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
             return revision.takeIf { it.acceptedCount > 0 }?.workingText
         }
 
-    /** Checks [text] as [language], or detects the language when it's null, starting afresh. */
-    fun check(text: String, language: Language?) {
+    /**
+     * Checks [text] as [language], or detects the language when it's null, starting afresh.
+     * [origin] and [hostApp] (the app the text came from, when known) go into history.
+     */
+    fun check(text: String, language: Language?, origin: Origin, hostApp: String? = null) {
         this.text = text
         this.language = language
         settled = emptyList()

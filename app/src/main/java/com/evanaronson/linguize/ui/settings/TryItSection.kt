@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.evanaronson.linguize.data.MenuEntry
+import com.evanaronson.linguize.history.Origin
 import com.evanaronson.linguize.ui.card.CardActions
 import com.evanaronson.linguize.ui.card.CheckViewModel
 import com.evanaronson.linguize.ui.card.ResultCard
@@ -42,7 +43,7 @@ internal fun TryItSection(check: CheckViewModel) {
     // Picking a language from the menu runs the check, as in the accessibility overlay.
     LanguagePicker(entry, onSelect = {
         entry = it
-        sample.trim().takeIf { text -> text.isNotEmpty() }?.let { text -> check.check(text, it.language) }
+        sample.trim().takeIf { text -> text.isNotEmpty() }?.let { text -> check.check(text, it.language, Origin.Tester) }
     })
 
     check.state?.let { state ->

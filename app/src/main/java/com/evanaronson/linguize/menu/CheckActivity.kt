@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import com.evanaronson.linguize.App
 import com.evanaronson.linguize.core.Selection
+import com.evanaronson.linguize.history.Origin
 import com.evanaronson.linguize.ui.card.CardActions
 import com.evanaronson.linguize.ui.card.CheckViewModel
 import com.evanaronson.linguize.ui.card.FloatingCard
@@ -33,7 +34,7 @@ class CheckActivity : ComponentActivity() {
         val entry = (application as App).menu.entryFor(intent.component)
 
         // Start the request before the first frame is drawn.
-        if (check.state == null) check.check(selection.text, entry.language)
+        if (check.state == null) check.check(selection.text, entry.language, Origin.Menu, callingPackage)
 
         val actions = CardActions.of(
             check,

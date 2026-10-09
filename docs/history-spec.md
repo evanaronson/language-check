@@ -10,8 +10,9 @@ Status: proposal, not built. Branch `feature/history`.
 | Feeds back into checks? | No. A writer profile is premature | Checks stay stateless; history is write-only until insights |
 | Full text or corrections only | Full text, keep everything | `text`, `finalText`, `meaning` and raw verdicts are stored |
 | Second platform | Not a consideration for this feature | Room; data classes stay Android-free anyway |
-| Categories | Tag at check time, keep raw verdicts for re-tagging | Taxonomy v1 in the prompt; rewordings tagged too |
+| Categories | None at check time. Patterns are found later by a model reading the raw edits and their reasons | No taxonomy, no `category` field; raw verdicts and `why` are kept |
 | Raw data access | Should be available | Export in v1 |
+| Where history lives | Home-first: the launcher screen becomes Home with Recent; Settings behind a gear; no button on the card | See UX |
 | Other users | Possibly friends, not public | On by default, plainly worded; consent moment designed before friends install |
 
 Linguize remembers every check and what came of it, on the phone, so that later it can tell you the kinds of mistakes you tend to make. This document is the analysis and the spec for the recording half. The insight half ("you drop accents on verb endings") is a later feature that can't exist until there is history to read.
@@ -116,13 +117,12 @@ Two tables. Rows are immutable once the session closes, except for soft deletion
 | `sessionId` | FK |
 | `attempt` | index into the session's attempts |
 | `kind` | `fix` · `natural` |
-| `category` | from the taxonomy below. **New verdict field** |
 | `start`, `end`, `fromText`, `toText`, `why` | as the card showed it, positions in the session's `text` |
 | `decision`, `decidedAt` | see above |
 
 Why not an event log? An append-only log of every tap is the purest shape for sync and would capture undo trajectories exactly, but it needs projection code from day one to show anything, and the insight feature would be a projection too. Two tables that a human can read in a SQLite browser, with the raw verdicts kept as JSON for anything we didn't think of, is the smaller debt. The `attempts` JSON is the escape hatch: if a future question needs something the columns don't have, it's in there.
 
-Why not one JSON document per session? It would be simplest to write, but `suggestions` is the table the insight feature aggregates over (by category, language, decision, date), and that wants real columns and an index, not `json_extract`.
+Why not one JSON document per session? It would be simplest to write, but `suggestions` is the table the insight feature aggregates over (by language, decision, date, text), and that wants real columns and an index, not `json_extract`.
 
 ### Sync-readiness, concretely
 
@@ -130,7 +130,7 @@ What's done now so a server later is additive:
 
 - UUIDs and `deviceId`: rows from two phones merge without collisions.
 - `updatedAt` and soft delete: "everything changed since last sync" is one query, and deletions travel.
-- `schema`, `promptHash`, `taxonomy` versions on the rows: the server never has to guess how to read an old row.
+- `schema` and `promptHash` versions on the rows: the server never has to guess how to read an old row.
 - The row classes are `@Serializable` Kotlin: the wire format is the storage format. Versioned, so that coupling is a feature, not a trap.
 - Nothing in a row depends on local state (no int ids, no references to settings).
 
@@ -138,31 +138,12 @@ What isn't done: a `syncState` table, an uploader, auth, conflict rules. When it
 
 ## Prompt changes (prerequisite)
 
-Two fields the verdict doesn't have today, both cheap in tokens, both much harder to add later than now:
+One field the verdict doesn't have today, cheap in tokens:
 
 1. **`language`**: the language the model judged the text as, as a name ("Catalan", "Spanish", "French", …), always filled, including when `status` is `wrong_language` (then it's the language it actually found). Without this, auto-detected checks can't be grouped by language. Side benefit for the card: "Not Catalan — this looks like Spanish."
-2. **`category`** on every fix and every rewording. A fixed, coarse taxonomy, because the insight feature groups by it and a taxonomy is painful to change once months of rows use it:
+The eval script and its cases get the new field; the prompt's examples get `language` values.
 
-| id | Covers | Example |
-|---|---|---|
-| `accent` | diacritics | estas → estàs |
-| `spelling` | other orthography | pícnic, ll/l·l |
-| `agreement` | gender, number | unes → uns, bo → bons |
-| `verb` | tense, mood, person, conjugation | me ha traído → he traído |
-| `function_word` | articles, prepositions, pronouns (ho, hi, en) | a → en |
-| `word_choice` | calques, anglicisms, false friends | algunas → unas, bodega → tienda |
-| `word_order` | | |
-| `punctuation` | commas, ¿ ¡, full stops | |
-| `capitalization` | | neo → Neo |
-| `typo` | duplicated or dropped letters and words | de de → de |
-| `register` | formality, tu/vostè | |
-| `other` | anything else | |
-
-Punctuation and capitalization are kept so the insight feature can *downweight* them: they depend on the Punctuation setting and aren't what the writer wants to hear about. Rewordings use the same list (mostly `word_choice`, `word_order`, `register`, `other`).
-
-Stored with `taxonomy = 1` on the row. If the list changes, old rows keep their version and the insight feature maps or ignores them.
-
-The eval script and its cases get the new fields; the prompt's examples get `language` and `category` values.
+No mistake categories are assigned at check time. The insight feature will hand a model the raw edits (from, to, why) across the whole history and let it find the patterns; at this scale that's one or two calls, it's consistent across all of history, and the structure (if any) is chosen with data in hand.
 
 ## UX
 
@@ -179,7 +160,7 @@ Two smaller problems: that header (picker + gear) only exists on the accessibili
 **History should reach the card as data, never as navigation.** The in-the-moment uses of history don't need a button:
 
 - *Instant re-open.* Checking the same text again within a few minutes (closed by accident, app lost the card) reuses the stored verdict: no model call, no wait. Free, invisible, and the first thing that makes the recording pay.
-- *"You've had this fix before."* Once categories exist, a fix on the card can carry one quiet line ("4th time this month"). That's the insight feature arriving in-situ. Later; noted here so the data supports it (it does: `textHash`, `category`, `fromText`).
+- *"You've had this fix before."* A fix on the card can carry one quiet line ("4th time this month"). That's the insight feature arriving in-situ. Later; noted here so the data supports it (it does: `fromText`, `toText`, `decision`).
 
 ### The launcher screen becomes Home
 
@@ -229,7 +210,7 @@ The glyph is Material's `history`: a clock with a counter-clockwise arrow. It's 
 
 ### Must have (v1)
 
-- [ ] `language` and `category` in the verdict schema, prompt, examples and eval.
+- [ ] `language` in the verdict schema, prompt, examples and eval.
 - [ ] `HistoryStore` interface; Room implementation with `sessions` and `suggestions`; DB created lazily; all I/O off the main thread.
 - [ ] `HistoryRecorder` (pure Kotlin) with tests for every decision and outcome in the tables above, including: undo after accept, rewording retiring a fix, Copy, re-check superseding, a failed attempt, close with nothing.
 - [ ] `CheckViewModel` reports to the recorder; `check()` takes an `origin`; the three hosts pass it.
@@ -256,7 +237,7 @@ Acceptance, the ones worth spelling out:
 
 ### Later (designed for, not built)
 
-- Insights: aggregate `suggestions` by `category × language × decision × week`, shown as a strip on Home; "you've had this fix before" on the card.
+- Insights: a model reads the kept edits and their reasons and names the patterns, shown as a strip on Home; "you've had this fix before" on the card.
 - Sync: `syncState` table, uploader, opt-in separate from this one.
 - Encrypt text columns before a public release.
 
@@ -274,7 +255,6 @@ Avoided:
 - No change to the card's behaviour or to `core/`. The edit engine doesn't know history exists.
 - No second copy of the data model for the wire: the row classes are the payload.
 
-Debt that the design cannot remove and that is worth naming: the taxonomy. Twelve ids chosen now shape what the insight feature can say in six months. They're coarse on purpose; it's easier to split a category than to merge two.
 
 ## Open questions
 
@@ -284,7 +264,7 @@ Debt that the design cannot remove and that is worth naming: the taxonomy. Twelv
 
 ## Phasing
 
-0. Prompt: `language`, `category`, examples, eval. Ship on its own; it's visible nowhere and de-risks the rest.
+0. Prompt: `language`, examples, eval. Ship on its own; it's visible nowhere and de-risks the rest.
 1. Record: store, recorder, view-model hook; Home/Settings split with the Recent list and the History section; export. Ship. Let it run.
 2. Host app in Recent; filters; instant re-open polish.
 3. Insights: a separate spec, written once there are a few hundred fixes to look at.

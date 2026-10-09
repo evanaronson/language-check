@@ -23,6 +23,7 @@ import com.evanaronson.linguize.App
 import com.evanaronson.linguize.R
 import com.evanaronson.linguize.core.Selection
 import com.evanaronson.linguize.data.MenuEntry
+import com.evanaronson.linguize.history.Origin
 import com.evanaronson.linguize.ui.card.CardActions
 import com.evanaronson.linguize.ui.card.CardState
 import com.evanaronson.linguize.ui.card.CheckViewModel
@@ -80,7 +81,7 @@ class LinguizeAccessibilityService : AccessibilityService() {
         val window = OverlayWindow(this)
         val check = ViewModelProvider(window, ViewModelProvider.AndroidViewModelFactory.getInstance(app))[CheckViewModel::class.java]
         var entry by mutableStateOf(MenuEntry.Auto)
-        check.check(selection.text, entry.language)
+        check.check(selection.text, entry.language, Origin.Button, field.packageName?.toString())
 
         val close: () -> Unit = {
             check.workingText?.let { writeBack(field, selection, it) }
@@ -121,7 +122,7 @@ class LinguizeAccessibilityService : AccessibilityService() {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             LanguagePicker(entry, onSelect = {
                                 entry = it
-                                check.check(selection.text, it.language)
+                                check.check(selection.text, it.language, Origin.Button, field.packageName?.toString())
                             })
                             FilledTonalIconButton(onClick = openSettings) {
                                 Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")
