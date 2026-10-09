@@ -89,7 +89,8 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
      * [origin] and [hostApp] (the app the text came from, when known) go into history.
      */
     fun check(text: String, language: Language?, origin: Origin, hostApp: String? = null) {
-        closeSession()
+        // A new check replaces the card; whatever it had accepted was never applied.
+        closeSession(applied = false)
         this.text = text
         this.language = language
         this.origin = origin
@@ -168,8 +169,9 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
         recording?.let { quietly("record a copy") { it.copied(kind) } }
     }
 
-    fun dismiss() {
-        closeSession()
+    /** Closes the card. [applied] says whether its accepted changes went back to the text. */
+    fun dismiss(applied: Boolean = true) {
+        closeSession(applied)
         job?.cancel()
         carried = emptyList()
         state = null
@@ -265,10 +267,10 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Closes the open session, if any, with what goes back to the app: the text with accepted changes. */
-    private fun closeSession() {
+    private fun closeSession(applied: Boolean = true) {
         val recording = recording ?: return
         this.recording = null
-        val finalText = workingText
+        val finalText = if (applied) workingText else null
         val closed = quietly("close a session") { recording.close(System.currentTimeMillis(), finalText) } ?: return
         write("write a closed session") { app.history.close(closed.session, closed.suggestions) }
     }

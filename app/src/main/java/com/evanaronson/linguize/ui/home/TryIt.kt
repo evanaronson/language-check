@@ -1,4 +1,4 @@
-package com.evanaronson.linguize.ui.settings
+package com.evanaronson.linguize.ui.home
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.OutlinedTextField
@@ -15,11 +15,10 @@ import com.evanaronson.linguize.ui.card.CardActions
 import com.evanaronson.linguize.ui.card.CheckViewModel
 import com.evanaronson.linguize.ui.card.ResultCard
 import com.evanaronson.linguize.ui.components.LanguagePicker
-import com.evanaronson.linguize.ui.components.SectionTitle
 
 /** A text box and the same card the selection menu shows, so checks can be tried here. */
 @Composable
-internal fun TryItSection(check: CheckViewModel) {
+internal fun TryIt(check: CheckViewModel, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
     var sample by rememberSaveable { mutableStateOf(SAMPLE) }
 
@@ -28,13 +27,12 @@ internal fun TryItSection(check: CheckViewModel) {
         check.dismiss()
     }
 
-    SectionTitle("Try it")
     OutlinedTextField(
         value = sample,
         onValueChange = {
             sample = it
-            // The card's suggestions are for the old text.
-            check.dismiss()
+            // The card's suggestions are for the old text, and nothing of them was applied.
+            check.dismiss(applied = false)
         },
         modifier = Modifier.fillMaxWidth(),
         minLines = 2,
@@ -49,7 +47,7 @@ internal fun TryItSection(check: CheckViewModel) {
     check.state?.let { state ->
         ResultCard(
             state = state,
-            actions = CardActions.of(check, context, onClose = ::applyAndClose, onOpenSettings = null),
+            actions = CardActions.of(check, context, onClose = ::applyAndClose, onOpenSettings = onOpenSettings),
             modifier = Modifier.fillMaxWidth(),
             scrollable = false,
         )

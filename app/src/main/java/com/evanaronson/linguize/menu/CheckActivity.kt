@@ -11,7 +11,7 @@ import com.evanaronson.linguize.history.Origin
 import com.evanaronson.linguize.ui.card.CardActions
 import com.evanaronson.linguize.ui.card.CheckViewModel
 import com.evanaronson.linguize.ui.card.FloatingCard
-import com.evanaronson.linguize.ui.settings.SettingsActivity
+import com.evanaronson.linguize.ui.home.HomeActivity
 import com.evanaronson.linguize.ui.theme.AppTheme
 
 /**
@@ -41,10 +41,7 @@ class CheckActivity : ComponentActivity() {
             context = this,
             onClose = ::finish,
             onOpenSettings = {
-                startActivity(
-                    Intent(this, SettingsActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-                )
+                startActivity(HomeActivity.settingsIntent(this))
                 finish()
             },
             canReplace = !readOnly,

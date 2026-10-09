@@ -1,9 +1,11 @@
 package com.evanaronson.linguize.ui.settings
 
 import android.app.Application
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.evanaronson.linguize.App
@@ -16,8 +18,15 @@ import com.evanaronson.linguize.llm.Provider
 import com.evanaronson.linguize.ui.card.title
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.IOException
+import java.time.LocalDate
 
 data class SettingsState(
     /** The entries shown in the text-selection menu; never empty. */
@@ -30,6 +39,8 @@ data class SettingsState(
     val model: String? = null,
     val models: ModelList = ModelList.Loaded(emptyList()),
     val modelTest: ModelTest? = null,
+    /** Whether checks are kept in history. */
+    val historyEnabled: Boolean = true,
 ) {
     val hasKey get() = keys[provider] is KeyStatus.Saved
 }
@@ -40,6 +51,9 @@ sealed interface ModelList {
     data class Loaded(val models: List<String>) : ModelList
     data object Failed : ModelList
 }
+
+/** How much history is kept: [count] checks, the oldest from [since]. */
+data class KeptHistory(val count: Int, val since: Long?)
 
 /** The result of trying the chosen model with a short check. */
 sealed interface ModelTest {
@@ -57,6 +71,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     var state by mutableStateOf<SettingsState?>(null)
         private set
 
+    /** Null until first counted. */
+    val history: StateFlow<KeptHistory?> = combine(app.history.count(), app.history.since()) { count, since -> KeptHistory(count, since) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** An export is being written. */
+    var exporting by mutableStateOf(false)
+        private set
+
     init {
         viewModelScope.launch {
             state = withContext(Dispatchers.IO) {
@@ -68,6 +90,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     provider = settings.provider,
                     keys = Provider.entries.associateWith { app.keys.status(it) },
                     model = settings.model(settings.provider),
+                    historyEnabled = settings.historyEnabled,
                 )
             }
             loadModels()
@@ -142,6 +165,44 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun removeKey() = saveKey("")
 
+    /** Off stops recording; it doesn't delete what's kept. */
+    fun setHistoryEnabled(enabled: Boolean) = change { state ->
+        app.settings.historyEnabled = enabled
+        state.copy(historyEnabled = enabled)
+    }
+
+    /** Deletes all history. On the app's scope, so leaving settings doesn't stop it halfway. */
+    fun clearHistory() {
+        app.appScope.launch { app.history.clear() }
+    }
+
+    /**
+     * Writes all history to a JSON Lines file in the cache and hands [onReady] a
+     * shareable link to it, or null if it couldn't be written. Replaces earlier exports.
+     */
+    fun exportHistory(onReady: (Uri?) -> Unit) {
+        if (exporting) return
+        exporting = true
+        viewModelScope.launch {
+            val uri = withContext(Dispatchers.IO) {
+                try {
+                    val folder = File(app.cacheDir, EXPORTS).apply { mkdirs() }
+                    folder.listFiles()?.forEach { it.delete() }
+                    val file = File(folder, "linguize-history-${LocalDate.now()}.jsonl")
+                    file.outputStream().buffered().use { app.history.export(it) }
+                    FileProvider.getUriForFile(app, "${app.packageName}.files", file)
+                } catch (_: IOException) {
+                    null
+                } catch (_: IllegalArgumentException) {
+                    // FileProvider: the folder isn't one res/xml/file_paths.xml shares.
+                    null
+                }
+            }
+            exporting = false
+            onReady(uri)
+        }
+    }
+
     private fun loadModels() {
         val current = state ?: return
         val provider = current.provider
@@ -165,5 +226,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private fun change(update: (SettingsState) -> SettingsState): SettingsState? {
         val current = state ?: return null
         return update(current).also { state = it }
+    }
+
+    private companion object {
+        /** The cache folder res/xml/file_paths.xml shares. */
+        const val EXPORTS = "exports"
     }
 }

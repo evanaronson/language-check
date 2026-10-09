@@ -9,7 +9,7 @@ Status: proposal, not built. Branch `feature/history`.
 | Who reads it, where | On the phone first; a server later | Rows are upload-ready; no client-side encryption the server couldn't undo |
 | Feeds back into checks? | No. A writer profile is premature | Checks stay stateless; history is write-only until insights |
 | Full text or corrections only | Full text, keep everything | `text`, `finalText`, `meaning` and raw verdicts are stored |
-| Second platform | Not a consideration for this feature | Room; data classes stay Android-free anyway |
+| Second platform | Not a consideration for this feature | Framework SQLite; data classes stay Android-free anyway |
 | Categories | None at check time. Patterns are found later by a model reading the raw edits and their reasons | No taxonomy, no `category` field; raw verdicts and `why` are kept |
 | Raw data access | Should be available | Export in v1 |
 | Where history lives | Home-first: the launcher screen becomes Home with Recent; Settings behind a gear; no button on the card | See UX |
@@ -47,13 +47,13 @@ Two things make this harder than "write a row":
 The app already has one place that knows everything about a check: `CheckViewModel` owns the text, the language, the settled answers, the revision (every suggested edit and what's accepted), and the moment the card closes. Recording hooks in there and nowhere else. The three hosts (selection menu, accessibility button, settings tester) change by one argument.
 
 ```
-CheckViewModel ──events──▶ HistoryRecorder ──rows──▶ HistoryStore (Room)
+CheckViewModel ──events──▶ HistoryRecorder ──rows──▶ HistoryStore (SQLite)
                                  │                        │
                           pure Kotlin, tested       data/ package
 ```
 
 - `HistoryRecorder` turns what happens in the view model into records. It's pure Kotlin with no Android in it, so the mapping (which suggestion ended up accepted, undone, ignored, retired, copied) is unit-tested like the edit engine.
-- `HistoryStore` is an interface with one Room implementation. The recorder and the settings screen talk to the interface. If storage changes (SQLDelight for an iOS port, a server), the recorder doesn't.
+- `HistoryStore` is an interface with one implementation on the framework's SQLite. The recorder and the settings screen talk to the interface. If storage changes (SQLDelight for an iOS port, a server), the recorder doesn't.
 - `App` gets an application-wide coroutine scope. The close-of-card write happens as the view model is being cleared, when `viewModelScope` is already cancelled, so it needs a scope that outlives the screen.
 
 ### What the recorder sees
@@ -211,7 +211,7 @@ The glyph is Material's `history`: a clock with a counter-clockwise arrow. It's 
 ### Must have (v1)
 
 - [ ] `language` in the verdict schema, prompt, examples and eval.
-- [ ] `HistoryStore` interface; Room implementation with `sessions` and `suggestions`; DB created lazily; all I/O off the main thread.
+- [ ] `HistoryStore` interface; SQLite implementation with `sessions` and `suggestions`; DB created lazily; all I/O off the main thread.
 - [ ] `HistoryRecorder` (pure Kotlin) with tests for every decision and outcome in the tables above, including: undo after accept, rewording retiring a fix, Copy, re-check superseding, a failed attempt, close with nothing.
 - [ ] `CheckViewModel` reports to the recorder; `check()` takes an `origin`; the three hosts pass it.
 - [ ] Open sessions found on process start are marked `abandoned`.
@@ -245,7 +245,7 @@ Acceptance, the ones worth spelling out:
 
 Taken on, deliberately:
 
-- **Room + KSP.** The first dependency with code generation in the build. It's the standard, it gives migrations, compile-checked queries and Flows. Risk: KSP must match Kotlin 2.4.20 under AGP 9's built-in Kotlin; the first task is a CI spike. Fallback if it fights: `androidx.sqlite` with hand-written SQL (two tables, ~150 lines) or SQLDelight (which also covers an iOS port).
+- **Hand-written SQL on the framework's SQLite** instead of Room. No new dependency and no code generation (a KSP version can't be verified against this toolchain without CI round-trips), at the cost of writing two tables' worth of SQL and Flows by hand. A test checks every record field has a column. Room or SQLDelight remain an easy swap behind `HistoryStore`.
 - **An application coroutine scope.** One new concept; it exists for the close write and nothing else should grow on it.
 - **`origin` on `check()`.** One more parameter on the view model's entry point.
 
@@ -259,7 +259,6 @@ Avoided:
 ## Open questions
 
 - Home-first (above) or the original idea (a settings section plus a history button on the card)? The spec argues for Home-first; it's the founder's call.
-- Room/KSP under this build chain (spike first; non-blocking).
 - Whether the raw verdict in `attempts` needs a size cap (a 3,000-character text twice over plus lists is ~15 KB; fine, but confirm).
 
 ## Phasing

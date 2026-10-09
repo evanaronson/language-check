@@ -2,7 +2,6 @@ package com.evanaronson.linguize.accessibility
 
 import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityService
-import android.content.Intent
 import android.os.Bundle
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -30,7 +29,7 @@ import com.evanaronson.linguize.ui.card.CheckViewModel
 import com.evanaronson.linguize.ui.card.FloatingCard
 import com.evanaronson.linguize.ui.components.LanguagePicker
 import com.evanaronson.linguize.ui.copyToClipboard
-import com.evanaronson.linguize.ui.settings.SettingsActivity
+import com.evanaronson.linguize.ui.home.HomeActivity
 import com.evanaronson.linguize.ui.theme.AppTheme
 import kotlinx.coroutines.flow.drop
 
@@ -95,7 +94,7 @@ class LinguizeAccessibilityService : AccessibilityService() {
         val openSettings: () -> Unit = {
             settingsBefore = app.settings.snapshot
             window.hidden = true
-            startActivity(Intent(this, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            startActivity(HomeActivity.settingsIntent(this))
         }
         val backFromSettings: () -> Unit = {
             val before = settingsBefore

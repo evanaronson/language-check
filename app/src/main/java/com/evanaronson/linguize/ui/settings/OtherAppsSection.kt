@@ -44,7 +44,7 @@ internal fun OtherAppsSection() {
 
 /**
  * Opens another app's screen from settings. Marked as not the user leaving, so a
- * card waiting behind settings stays hidden (see [SettingsActivity.onUserLeaveHint]).
+ * card waiting behind settings stays hidden (see [com.evanaronson.linguize.ui.home.HomeActivity.onUserLeaveHint]).
  */
 internal fun Context.openFromSettings(intent: Intent) =
     startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION))

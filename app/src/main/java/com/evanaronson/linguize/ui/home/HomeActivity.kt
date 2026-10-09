@@ -1,0 +1,134 @@
+package com.evanaronson.linguize.ui.home
+
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import com.evanaronson.linguize.App
+import com.evanaronson.linguize.ui.card.CheckViewModel
+import com.evanaronson.linguize.ui.history.HistoryViewModel
+import com.evanaronson.linguize.ui.history.SessionScreen
+import com.evanaronson.linguize.ui.history.SessionViewModel
+import com.evanaronson.linguize.ui.settings.SettingsScreen
+import com.evanaronson.linguize.ui.settings.SettingsViewModel
+import com.evanaronson.linguize.ui.theme.AppTheme
+
+/**
+ * The launcher icon's activity: Home (try a check, recent checks), Settings behind the
+ * gear, and a past check's page. A card's "Open settings" comes straight to Settings
+ * through [settingsIntent], and back from there returns to the card.
+ */
+class HomeActivity : ComponentActivity() {
+    private val settings: SettingsViewModel by viewModels()
+    private val check: CheckViewModel by viewModels()
+    private val history: HistoryViewModel by viewModels()
+    private val session: SessionViewModel by viewModels()
+
+    private var screen by mutableStateOf<Screen>(Screen.Home)
+
+    /** Settings was opened from a card: back leaves for the card instead of going to Home. */
+    private var backToCard = false
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        if (savedInstanceState == null) {
+            show(intent)
+        } else {
+            screen = Screen.restore(savedInstanceState.getString(SCREEN)) ?: Screen.Home
+            backToCard = savedInstanceState.getBoolean(BACK_TO_CARD)
+            (screen as? Screen.Detail)?.let { session.load(it.id) }
+        }
+        setContent {
+            AppTheme {
+                Surface(Modifier.fillMaxSize()) {
+                    BackHandler(enabled = screen != Screen.Home, onBack = ::back)
+                    // Keeps Home's text, card and scroll position while another screen is shown.
+                    val saved = rememberSaveableStateHolder()
+                    when (val current = screen) {
+                        Screen.Home -> saved.SaveableStateProvider(current.saved) {
+                            HomeScreen(
+                                check,
+                                history,
+                                historyOn = settings.state?.historyEnabled,
+                                onOpenSettings = { screen = Screen.Settings },
+                                onOpen = ::open,
+                            )
+                        }
+                        Screen.Settings -> saved.SaveableStateProvider(current.saved) {
+                            SettingsScreen(settings, onBack = ::back)
+                        }
+                        is Screen.Detail -> SessionScreen(session, onBack = ::back)
+                    }
+                }
+            }
+        }
+    }
+
+    /** A card opened Settings while this activity was already at the top. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        show(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(SCREEN, screen.saved)
+        outState.putBoolean(BACK_TO_CARD, backToCard)
+    }
+
+    /** Going home or to recents. Links this screen opens say they're not the user leaving. */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        (application as App).settingsLeft.value++
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (isFinishing) (application as App).settingsLeft.value++
+    }
+
+    private fun show(intent: Intent) {
+        // Reopened from recents, the old intent comes again; the card it was for is long gone.
+        val fromHistory = (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        if (intent.getBooleanExtra(EXTRA_SETTINGS, false) && !fromHistory) {
+            screen = Screen.Settings
+            backToCard = true
+        }
+    }
+
+    private fun open(id: String) {
+        session.load(id)
+        screen = Screen.Detail(id)
+    }
+
+    private fun back() {
+        if (screen == Screen.Settings && backToCard) {
+            finish()
+        } else {
+            screen = Screen.Home
+        }
+    }
+
+    companion object {
+        private const val EXTRA_SETTINGS = "com.evanaronson.linguize.extra.SETTINGS"
+        private const val SCREEN = "screen"
+        private const val BACK_TO_CARD = "backToCard"
+
+        /** Opens Settings from a card, reusing this activity if it's already on top. */
+        fun settingsIntent(context: Context): Intent = Intent(context, HomeActivity::class.java)
+            .putExtra(EXTRA_SETTINGS, true)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+    }
+}
