@@ -49,7 +49,7 @@ jobs:
         if: github.ref != 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
-          name: linguize-${{ github.ref_name }}-${{ github.run_number }}
+          name: linguize-branch-${{ github.run_number }}
           path: app/build/outputs/apk/release/app-release.apk
 
       # A release gives a direct download link that works from the phone's browser. The same
