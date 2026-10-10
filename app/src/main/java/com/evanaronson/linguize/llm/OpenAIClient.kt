@@ -71,7 +71,8 @@ class OpenAIClient(private val http: OkHttpClient, private val prompt: Prompt) :
                 val why = root["incomplete_details"]?.jsonObject?.get("reason")?.jsonPrimitive?.content
                 // Half a JSON object would only fail as "not in the expected format", and again on retry.
                 if (why == "max_output_tokens") throw truncated()
-                throw CheckFailure(CheckFailure.Reason.BadResponse, "The model stopped before finishing (${why ?: "unknown"})")
+                if (why == "content_filter") throw declined("OpenAI")
+                throw CheckFailure(CheckFailure.Reason.BadResponse, "The AI stopped before finishing. Reason given: ${why ?: "none"}")
             }
             root["output"]?.jsonArray.orEmpty()
                 .map { it.jsonObject }

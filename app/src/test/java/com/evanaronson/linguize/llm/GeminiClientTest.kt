@@ -47,6 +47,15 @@ class GeminiClientTest {
     }
 
     @Test
+    fun aSafetyStopIsSaidPlainly() {
+        val payload = """{"candidates":[{"finishReason":"SAFETY"}]}"""
+        val failure = assertThrows(CheckFailure::class.java) { GeminiClient.answer(payload) }
+        assertEquals("Gemini declined to check this text.", failure.detail)
+        val blocked = """{"promptFeedback":{"blockReason":"SAFETY"}}"""
+        assertEquals("Gemini declined to check this text.", assertThrows(CheckFailure::class.java) { GeminiClient.answer(blocked) }.detail)
+    }
+
+    @Test
     fun thoughtsAreLeftOutOfTheAnswer() {
         val payload = """{"candidates":[{"content":{"parts":[{"text":"hmm","thought":true},{"text":"{}"}]},"finishReason":"STOP"}]}"""
         assertEquals("{}", GeminiClient.answer(payload))

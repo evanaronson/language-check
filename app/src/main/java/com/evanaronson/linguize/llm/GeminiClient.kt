@@ -95,8 +95,13 @@ class GeminiClient(private val http: OkHttpClient, private val prompt: Prompt) :
         /** The answer text, without any thought parts. Throws [CheckFailure]; TooLong when it was cut off. */
         fun answer(payload: String): String = readResponse(payload) { root ->
             val candidate = root["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
-                ?: throw CheckFailure(CheckFailure.Reason.BadResponse, "The model returned no answer")
+                ?: throw if (root["promptFeedback"]?.jsonObject?.get("blockReason") != null) {
+                    declined("Gemini")
+                } else {
+                    CheckFailure(CheckFailure.Reason.BadResponse, "The AI sent an empty reply.")
+                }
             val finish = candidate["finishReason"]?.jsonPrimitive?.content
+            if (finish in BLOCKED_FINISHES) throw declined("Gemini")
             // Half a JSON object would only fail as "not in the expected format", and again on retry.
             if (finish == "MAX_TOKENS") throw truncated()
             val text = candidate["content"]?.jsonObject?.get("parts")?.jsonArray.orEmpty()
@@ -104,7 +109,7 @@ class GeminiClient(private val http: OkHttpClient, private val prompt: Prompt) :
                 .filterNot { it["thought"]?.jsonPrimitive?.booleanOrNull == true }
                 .joinToString("") { it["text"]?.jsonPrimitive?.content.orEmpty() }
             if (text.isBlank()) {
-                throw CheckFailure(CheckFailure.Reason.BadResponse, "The model returned no answer (${finish ?: "unknown"})")
+                throw CheckFailure(CheckFailure.Reason.BadResponse, "The AI sent no reply. Reason given: ${finish ?: "none"}")
             }
             text
         }
@@ -120,6 +125,9 @@ class GeminiClient(private val http: OkHttpClient, private val prompt: Prompt) :
             }
             return failureFor(code, payload, reason)
         }
+
+        /** Finish reasons that mean Gemini refused the text, not that something broke. */
+        private val BLOCKED_FINISHES = setOf("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "IMAGE_SAFETY")
 
         /** "model" or "models" as a word of its own, not inside a service's name. */
         private val MODEL_WORD = Regex("""\bmodels?\b""", RegexOption.IGNORE_CASE)

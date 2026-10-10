@@ -82,13 +82,13 @@ class LinguizeAccessibilityService : AccessibilityService() {
 
         val field = focused?.takeIf { it.isEditable }
         if (field != null && (field.isPassword || PrivateField.matches(field.inputType, field.hintText, field.viewIdResourceName))) {
-            Toast.makeText(this, "Linguize doesn't read fields for passwords, codes, numbers or email addresses", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "This field looks private, so Linguize didn't read it.", Toast.LENGTH_LONG).show()
             return
         }
         val selection = field?.takeUnless { it.isShowingHintText }?.text?.toString()
             ?.let { Selection.of(it, field.textSelectionStart, field.textSelectionEnd) }
         if (field == null || selection == null || selection.text.isEmpty()) {
-            Toast.makeText(this, "Type something in a text field first", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No text to check. Tap the field you wrote in, then try again.", Toast.LENGTH_LONG).show()
             return
         }
 
@@ -141,7 +141,7 @@ class LinguizeAccessibilityService : AccessibilityService() {
                                 check.changeLanguage(it)
                             })
                             FilledTonalIconButton(onClick = openSettings) {
-                                Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")
+                                Icon(painterResource(R.drawable.ic_settings), contentDescription = "Linguize settings")
                             }
                         }
                     }
@@ -164,8 +164,8 @@ class LinguizeAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Puts the corrected text back in place of the selection. If the field changed or
-     * went away while the card was open, it isn't overwritten: the text is copied instead.
+     * Puts the text, with the accepted changes, back in place of the selection. If the field
+     * changed or went away while the card was open, it isn't overwritten: the text is copied instead.
      * Returns true when the text went into the field, false when it was copied.
      */
     private fun writeBack(field: AccessibilityNodeInfo, selection: Selection, replacement: String): Boolean {
@@ -183,8 +183,8 @@ class LinguizeAccessibilityService : AccessibilityService() {
             return true
         }
         copyToClipboard(replacement)
-        val why = if (unchanged) "This app didn't accept the change" else "The text changed meanwhile"
-        Toast.makeText(this, "$why; the corrected text is copied instead", Toast.LENGTH_LONG).show()
+        val why = if (unchanged) "Couldn't put the text back" else "The field changed or is gone, so the text wasn't put back"
+        Toast.makeText(this, "$why. It's copied with your changes: paste it in.", Toast.LENGTH_LONG).show()
         return false
     }
 

@@ -44,13 +44,13 @@ class Prompt(val system: String, schemaJson: String) {
     }
 
     fun parseVerdict(answer: String): Verdict {
-        if (answer.isBlank()) throw CheckFailure(CheckFailure.Reason.BadResponse, "The model returned no answer")
+        if (answer.isBlank()) throw CheckFailure(CheckFailure.Reason.BadResponse, "The AI sent an empty reply.")
         return try {
             json.decodeFromString<Verdict>(answer)
         } catch (e: SerializationException) {
-            throw CheckFailure(CheckFailure.Reason.BadResponse, "The model's answer wasn't in the expected format", e)
+            throw CheckFailure(CheckFailure.Reason.BadResponse, "The AI's reply wasn't in the form Linguize needs.", e)
         } catch (e: IllegalArgumentException) {
-            throw CheckFailure(CheckFailure.Reason.BadResponse, "The model's answer wasn't in the expected format", e)
+            throw CheckFailure(CheckFailure.Reason.BadResponse, "The AI's reply wasn't in the form Linguize needs.", e)
         }
     }
 

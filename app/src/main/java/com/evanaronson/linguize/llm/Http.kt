@@ -80,7 +80,7 @@ internal fun ResponseBody.readCapped(limit: Long = MAX_BODY_BYTES): String {
     return source.buffer.readUtf8()
 }
 
-private fun tooLarge() = CheckFailure(CheckFailure.Reason.BadResponse, "The provider's response was too large")
+private fun tooLarge() = CheckFailure(CheckFailure.Reason.BadResponse, "The AI's reply was too large.")
 
 /** Reads a provider's JSON response; anything malformed becomes a BadResponse rather than a crash. */
 internal inline fun <T> readResponse(payload: String, read: (JsonObject) -> T): T = try {
@@ -117,10 +117,14 @@ internal fun errorObject(payload: String): JsonObject? = runCatching {
 /** The `error.message` field both Gemini and OpenAI use, trimmed, or null. */
 internal fun errorMessage(payload: String): String? = runCatching {
     errorObject(payload)?.get("message")?.jsonPrimitive?.content
-}.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+}.getOrNull()?.let(::scrubSecrets)?.takeIf { it.isNotEmpty() }
 
 /** What the card says when an answer was cut off at the output limit. */
 internal fun truncated(): CheckFailure = CheckFailure(
     CheckFailure.Reason.TooLong,
-    "The answer was cut off at the model's output limit. Try a shorter selection.",
+    "The AI's reply got cut off. A shorter text avoids this.",
 )
+
+/** The plain reason when [service] won't check a text (Gemini's SAFETY, OpenAI's content_filter). */
+internal fun declined(service: String): CheckFailure =
+    CheckFailure(CheckFailure.Reason.BadResponse, "$service declined to check this text.")

@@ -45,6 +45,7 @@ class OpenAIClientTest {
         val payload = """{"status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[]}"""
         val failure = assertThrows(CheckFailure::class.java) { OpenAIClient.answer(payload) }
         assertEquals(Reason.BadResponse, failure.reason)
+        assertEquals("OpenAI declined to check this text.", failure.detail)
     }
 
     @Test

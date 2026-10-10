@@ -45,7 +45,7 @@ class Checker(
         settled: List<Settled> = emptyList(),
         context: CheckContext? = null,
     ): Checked {
-        if (text.length > MAX_CHARS) throw CheckFailure(CheckFailure.Reason.TooLong)
+        if (text.length > MAX_CHARS) throw CheckFailure(CheckFailure.Reason.TooLong, "Linguize checks up to 3,000 characters at a time.")
         return failingAsCheckFailure {
             val used = context ?: readContext()
             val request = CheckRequest(text, language, used.punctuation, used.judgments, settled, used.native)
@@ -95,7 +95,7 @@ class Checker(
     private fun key(provider: Provider): String {
         val key = keys.get(provider) ?: throw CheckFailure(CheckFailure.Reason.NoKey)
         // HTTP headers only carry printable ASCII; anything else can't be a real key.
-        if (key.any { it !in ' '..'~' }) throw CheckFailure(CheckFailure.Reason.BadKey, "The saved key contains characters a key can't have")
+        if (key.any { it !in ' '..'~' }) throw CheckFailure(CheckFailure.Reason.BadKey, "The saved key has characters that keys never contain.")
         return key
     }
 

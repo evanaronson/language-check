@@ -96,6 +96,6 @@ class CheckActivity : ComponentActivity() {
 
         /** How long finishing may wait for the session's close to be written. */
         const val CLOSE_WAIT_MS = 500L
-        const val TOO_MANY_DETAIL = "An app asked for many checks in a short time, so this one wasn't sent."
+        const val TOO_MANY_DETAIL = "This one wasn't sent to the AI."
     }
 }
