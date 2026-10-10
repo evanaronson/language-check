@@ -16,11 +16,18 @@ internal object Alignment {
 
         /** Lowercase without accents, for pairing a word with its corrected spelling. */
         val folded: String = if (type == Type.Word) fold(text) else text
+
+        /**
+         * The text in composed form (NFC), so a word typed with a separate accent mark
+         * ("e" + "◌́", as text pasted from macOS often has) equals the same word written with
+         * "é". Only for comparing: positions and [text] stay as the text has them.
+         */
+        val normal: String = nfc(text)
     }
 
     /** One step of the alignment: a token kept, replaced, removed (b null) or added (a null). */
     data class Op(val a: Token?, val b: Token?) {
-        val isMatch get() = a != null && b != null && a.text == b.text
+        val isMatch get() = a != null && b != null && a.normal == b.normal
         val token get() = a ?: b!!
         val isPunct get() = a?.type == Type.Punct || b?.type == Type.Punct
     }
@@ -39,14 +46,14 @@ internal object Alignment {
         // Shared tokens at the end pair first: equal tokens at the end always pair on a
         // cheapest path, and the walk prefers a pair.
         var suffix = 0
-        while (suffix < minOf(a.size, b.size) && a[a.size - 1 - suffix].text == b[b.size - 1 - suffix].text) suffix++
+        while (suffix < minOf(a.size, b.size) && a[a.size - 1 - suffix].normal == b[b.size - 1 - suffix].normal) suffix++
         val n = a.size - suffix
         val m = b.size - suffix
         // At the start the walk can leave the shared tokens ("a a" against "a" pairs the second
         // "a"), so it goes on into them, where costs need no table: aligning a text with one that
         // starts with all of it only costs adding the rest.
         var prefix = 0
-        while (prefix < minOf(n, m) && a[prefix].text == b[prefix].text) prefix++
+        while (prefix < minOf(n, m) && a[prefix].normal == b[prefix].normal) prefix++
         val gapsA = IntArray(n + 1).also { for (k in 0 until n) it[k + 1] = it[k] + gap(a[k]) }
         val gapsB = IntArray(m + 1).also { for (k in 0 until m) it[k + 1] = it[k] + gap(b[k]) }
         fun shared(i: Int, j: Int) = if (j >= i) gapsB[j] - gapsB[i] else gapsA[i] - gapsA[j]
@@ -156,12 +163,17 @@ internal object Alignment {
 
     /** Cost of pairing [x] with [y], or null when they can't pair (a word with a comma). */
     private fun substitution(x: Token, y: Token): Int? = when {
-        x.text == y.text -> 0
+        x.normal == y.normal -> 0
         x.type != y.type -> null
         x.type == Type.Space -> 1
         x.type == Type.Word && x.folded == y.folded -> 1
         else -> 2
     }
+
+    /** Whether [x] and [y] are the same text, written with the same or different but equivalent characters ("é" or "e" + "◌́"). */
+    fun same(x: String, y: String) = x == y || nfc(x) == nfc(y)
+
+    private fun nfc(s: String) = if (Normalizer.isNormalized(s, Normalizer.Form.NFC)) s else Normalizer.normalize(s, Normalizer.Form.NFC)
 
     private fun fold(s: String) =
         Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD).filterNot { Character.getType(it) == Character.NON_SPACING_MARK.toInt() }

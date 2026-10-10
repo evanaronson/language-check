@@ -28,7 +28,8 @@ sealed interface CheckResult {
 /**
  * Turns the model's [verdict] into edits of [original]. Fixes and rewordings are
  * both anchored to the original text, so either can be accepted on its own;
- * a "change" that changes nothing produces no edit.
+ * a "change" that changes nothing produces no edit, and one that adds a link
+ * isn't offered (see [Links]).
  */
 fun interpret(
     original: String,
@@ -53,7 +54,7 @@ fun interpret(
         .orEmpty()
 
     return CheckResult.Reviewed(
-        Revision(original, fixes + naturals),
+        Revision(original, Links.withoutNew(original, fixes + naturals)),
         kinds = EditKind.entries.filter { it in judgments.kinds },
         assumptions = verdict.assumptions.filter { it.about.isNotBlank() && it.assumed.isNotBlank() },
         meaning = verdict.meaning.trim().takeUnless { isUntranslated(it, original) }.orEmpty(),

@@ -53,12 +53,27 @@ data class Revision(
     /**
      * Accepts, as one action, the edits identical to [previous] (same kind, span and
      * replacement): after a re-check, what the writer had accepted stays accepted
-     * wherever the new suggestions didn't change.
+     * wherever the new suggestions didn't change. Each of [previous] accepts one edit at
+     * most, so of several identical suggestions (three inserted "."s) only as many stay
+     * accepted as the writer had accepted.
      */
     fun acceptMatching(previous: List<Edit>): Revision {
-        val ids = edits.filter { edit ->
-            previous.any { it.kind == edit.kind && it.start == edit.start && it.end == edit.end && it.replacement == edit.replacement }
-        }.map { it.id }
+        val unmatched = previous.toMutableList()
+        val matched = mutableSetOf<Int>()
+        // Identical suggestions pair up by their place in the corrected text first.
+        for (byOrder in listOf(true, false)) {
+            for (edit in edits) {
+                if (edit.id in matched) continue
+                val match = unmatched.indexOfFirst {
+                    it.kind == edit.kind && it.start == edit.start && it.end == edit.end && it.replacement == edit.replacement &&
+                        (!byOrder || it.order == edit.order)
+                }
+                if (match < 0) continue
+                unmatched.removeAt(match)
+                matched += edit.id
+            }
+        }
+        val ids = edits.filter { it.id in matched }.map { it.id }
         return if (ids.isEmpty()) this else copy(steps = steps + listOf(ids))
     }
 

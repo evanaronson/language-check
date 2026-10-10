@@ -2,6 +2,7 @@ package com.evanaronson.linguize.core
 
 import com.evanaronson.linguize.core.Alignment.Op
 import com.evanaronson.linguize.core.Alignment.Type
+import java.text.BreakIterator
 
 /**
  * Turns the model's full corrected and natural texts into edits of the
@@ -39,7 +40,7 @@ internal object Edits {
         }
         val spans = mergeWithinFixes(inBase, base, placed).map { toOriginal(it, base, original, placed) }
             // Changes that only restate a fix, or undo one, don't change the original.
-            .filter { it.from != it.replacement }
+            .filterNot { Alignment.same(it.from, it.replacement) }
         return toEdits(spans, reported, EditKind.Natural, firstId)
     }
 
@@ -56,12 +57,39 @@ internal object Edits {
     )
 
     private fun toEdits(spans: List<Span>, reported: List<VerdictChange>, kind: EditKind, firstId: Int): List<Edit> {
-        val unused = reported.toMutableList()
+        val reasons = reasons(spans, reported)
         return spans.mapIndexed { index, span ->
-            val why = span.why ?: bestMatch(span, unused)?.also { unused.remove(it) }?.let(::reason)
-            Edit(firstId + index, kind, span.start, span.end, span.from, span.replacement, why, span.includes, span.order)
+            Edit(firstId + index, kind, span.start, span.end, span.from, span.replacement, reasons[index], span.includes, span.order)
         }
     }
+
+    /**
+     * Each span's reason: its own, or the one of the model's changes that matches it best.
+     * Closer kinds of match are settled for every span before looser ones, so a change
+     * goes to the span it describes exactly ("si" → "sí") rather than to an earlier one
+     * that merely contains its text ("asi" → "así").
+     */
+    private fun reasons(spans: List<Span>, reported: List<VerdictChange>): List<String?> {
+        val unused = reported.toMutableList()
+        val found = arrayOfNulls<VerdictChange>(spans.size)
+        for (level in matches) {
+            spans.forEachIndexed { index, span ->
+                if (span.why != null || found[index] != null) return@forEachIndexed
+                val to = span.replacement.trim()
+                val from = span.from.trim()
+                found[index] = unused.firstOrNull { level(from, to, it.from.trim(), it.to.trim()) }?.also { unused.remove(it) }
+            }
+        }
+        return spans.mapIndexed { index, span -> span.why ?: found[index]?.let(::reason) }
+    }
+
+    /** Ways a span (its from and to) can match a reported change (its from and to), closest first. */
+    private val matches: List<(String, String, String, String) -> Boolean> = listOf(
+        { from, to, otherFrom, otherTo -> Alignment.same(otherTo, to) && Alignment.same(otherFrom, from) },
+        { _, to, _, otherTo -> Alignment.same(otherTo, to) },
+        { from, _, otherFrom, _ -> from.isNotEmpty() && Alignment.same(otherFrom, from) },
+        { _, to, _, otherTo -> otherTo.isNotEmpty() && to.isNotEmpty() && (otherTo in to || to in otherTo) },
+    )
 
     /** The model's rewordings found in [base], or null unless applying them produces [target]. */
     private fun located(base: String, target: String, reported: List<VerdictChange>): List<Span>? {
@@ -73,7 +101,7 @@ internal object Edits {
             val to = change.to.trim()
             // An empty side can't be placed or shown; let the alignment work it out instead.
             if (from.isEmpty() || to.isEmpty()) return null
-            if (from == to) continue
+            if (Alignment.same(from, to)) continue
             val at = find(base, from, searchFrom) ?: find(base, from, 0) ?: return null
             if (spans.any { at < it.end && it.start < at + from.length }) return null
             spans += Span(at, at + from.length, from, to, reason(change))
@@ -87,19 +115,7 @@ internal object Edits {
             pos = span.end
         }
         applied.append(base, pos, base.length)
-        return spans.takeIf { applied.toString().trim() == target.trim() }
-    }
-
-    private fun bestMatch(span: Span, candidates: List<VerdictChange>): VerdictChange? {
-        val to = span.replacement.trim()
-        val from = span.from.trim()
-        return candidates.firstOrNull { it.to.trim() == to && it.from.trim() == from }
-            ?: candidates.firstOrNull { it.to.trim() == to }
-            ?: candidates.firstOrNull { from.isNotEmpty() && it.from.trim() == from }
-            ?: candidates.firstOrNull {
-                val other = it.to.trim()
-                other.isNotEmpty() && to.isNotEmpty() && (other in to || to in other)
-            }
+        return spans.takeIf { Alignment.same(applied.toString().trim(), target.trim()) }
     }
 
     private fun reason(change: VerdictChange) = change.why.trim().ifEmpty { null }
@@ -281,17 +297,23 @@ internal object Edits {
      * [fixed] tells which characters of [text] a fix put there.
      */
     private fun tidy(text: String, spans: List<Span>, fixed: (Int) -> Boolean = { false }): List<Span> {
-        val trimmed = spans.map(::trimSpaces).filterNot { it.replacement.isEmpty() && it.from.isBlank() }
+        val trimmed = spans.map(::trimSpaces)
+            .filterNot { it.replacement.isEmpty() && it.from.isBlank() || Alignment.same(it.from, it.replacement) }
+        val characters by lazy { BreakIterator.getCharacterInstance().apply { setText(text) } }
         return trimmed.map { span ->
             // An inserted "␣al" before a space is the same as "al␣" after it, unless something
             // else is inserted at the same place, which the move would jump over, or the space
             // belongs to another change ([fixed], or another span), which it would land inside.
-            val alone = trimmed.none { it !== span && it.start <= span.start && span.start < maxOf(it.end, it.start + 1) }
+            // The space moves whole, so a line break ("\r\n") is never split.
             val replacement = span.replacement
-            if (alone && span.start == span.end && replacement.length > 1 && replacement[0].isWhitespace() &&
-                text.getOrNull(span.start) == replacement[0] && !fixed(span.start)
+            val space = firstSpace(replacement)
+            val length = space.length
+            val alone = trimmed.none { it !== span && it.start < span.start + length && span.start < maxOf(it.end, it.start + 1) }
+            if (alone && span.start == span.end && replacement.length > length && length > 0 &&
+                firstSpace(text, span.start) == space && (span.start until span.start + length).none(fixed) &&
+                characters.isBoundary(span.start + length)
             ) {
-                span.copy(start = span.start + 1, end = span.end + 1, replacement = replacement.drop(1) + replacement[0])
+                span.copy(start = span.start + length, end = span.end + length, replacement = replacement.drop(length) + space)
             } else {
                 span
             }
@@ -300,27 +322,52 @@ internal object Edits {
 
     private fun trimSpaces(span: Span): Span {
         var (start, end, from, replacement) = span
-        while (from.isNotEmpty() && replacement.isNotEmpty() && from[0] == replacement[0] && from[0].isWhitespace()) {
-            from = from.drop(1)
-            replacement = replacement.drop(1)
-            start++
+        while (true) {
+            val space = firstSpace(from)
+            if (space.isEmpty() || firstSpace(replacement) != space) break
+            from = from.drop(space.length)
+            replacement = replacement.drop(space.length)
+            start += space.length
         }
-        while (from.isNotEmpty() && replacement.isNotEmpty() && from.last() == replacement.last() && from.last().isWhitespace()) {
-            from = from.dropLast(1)
-            replacement = replacement.dropLast(1)
-            end--
+        while (true) {
+            val space = lastSpace(from)
+            if (space.isEmpty() || lastSpace(replacement) != space) break
+            from = from.dropLast(space.length)
+            replacement = replacement.dropLast(space.length)
+            end -= space.length
         }
         return span.copy(start = start, end = end, from = from, replacement = replacement)
     }
 
+    /** The space character [text] has at [at], taking "\r\n" as one; empty if something else is there. */
+    private fun firstSpace(text: String, at: Int = 0) = when {
+        text.startsWith("\r\n", at) -> "\r\n"
+        text.getOrNull(at)?.isWhitespace() == true -> text.substring(at, at + 1)
+        else -> ""
+    }
+
+    /** The space character [text] ends with, taking "\r\n" as one; empty if it ends with something else. */
+    private fun lastSpace(text: String) = when {
+        text.endsWith("\r\n") -> "\r\n"
+        text.lastOrNull()?.isWhitespace() == true -> text.substring(text.length - 1)
+        else -> ""
+    }
+
     /**
      * Index of [target] in [text] at or after [from], preferring a match that isn't
-     * inside a longer word, so "bien" doesn't land in "también".
+     * inside a longer word, so "bien" doesn't land in "también". A match that would cut
+     * a character in two (part of an emoji, or a letter without its accent mark) doesn't
+     * count: an edit there would break the character.
      */
     private fun find(text: String, target: String, from: Int): Int? {
+        val characters = BreakIterator.getCharacterInstance().apply { setText(text) }
         var fallback: Int? = null
         var index = text.indexOf(target, from)
         while (index >= 0) {
+            if (!characters.isBoundary(index) || !characters.isBoundary(index + target.length)) {
+                index = text.indexOf(target, index + 1)
+                continue
+            }
             val before = text.getOrNull(index - 1)
             val after = text.getOrNull(index + target.length)
             val wholeWord = (before == null || !before.isLetter() || !target.first().isLetter()) &&
