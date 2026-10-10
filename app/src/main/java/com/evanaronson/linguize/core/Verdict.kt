@@ -42,7 +42,8 @@ data class Assumption(
     val alternatives: List<String> = emptyList(),
 )
 
-/** The writer's own answer to an assumption, sent with a re-check so the model follows it. */
+/** The writer's own answer to an assumption, sent with a re-check so the model follows it. Kept in history as is. */
+@Serializable
 data class Settled(val about: String, val answer: String)
 
 /** One change as the model describes it; used for its reason, not its position. */
