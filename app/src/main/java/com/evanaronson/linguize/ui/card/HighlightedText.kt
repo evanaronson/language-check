@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -174,7 +175,7 @@ private fun Explanation(change: Highlight, replacement: String, accent: Color, o
                         val from = change.from
                         if (from.isEmpty()) {
                             // Something added, like a comma.
-                            append("+ ")
+                            append("Add ")
                         } else {
                             pushStyle(SpanStyle(textDecoration = TextDecoration.LineThrough))
                             append(from)
@@ -186,6 +187,11 @@ private fun Explanation(change: Highlight, replacement: String, accent: Color, o
                         pop()
                     },
                     style = MaterialTheme.typography.labelLarge,
+                    // In words: the arrow would be read out as "right arrow".
+                    modifier = Modifier.semantics {
+                        contentDescription =
+                            if (change.from.isEmpty()) "Add $replacement" else "${change.from} becomes $replacement"
+                    },
                 )
                 change.why?.let {
                     Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -193,7 +199,7 @@ private fun Explanation(change: Highlight, replacement: String, accent: Color, o
             }
             if (onReplace != null) {
                 Spacer(Modifier.width(8.dp))
-                FilledTonalButton(onClick = onReplace) { Text("Replace") }
+                FilledTonalButton(onClick = onReplace) { Text("Accept") }
             }
         }
     }

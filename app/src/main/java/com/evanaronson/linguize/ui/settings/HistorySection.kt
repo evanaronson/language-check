@@ -39,20 +39,23 @@ internal fun HistorySection(state: SettingsState, settings: SettingsViewModel) {
     var confirmingClear by rememberSaveable { mutableStateOf(false) }
 
     SectionTitle("History")
-    SwitchRow("Remember what I check", checked = state.historyEnabled, onChange = settings::setHistoryEnabled)
+    SwitchRow("Save checks in History", checked = state.historyEnabled, onChange = settings::setHistoryEnabled)
     Text(
-        "Kept on this phone only, so Linguize can later show you the mistakes you tend to make. " +
-            "Turning this off keeps what's already here.",
+        if (state.historyEnabled) {
+            "Your text and the suggestions are saved on this phone only."
+        } else {
+            "New checks aren't saved. Saved ones stay until you delete them."
+        },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(kept?.let(::keptLabel).orEmpty(), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        TextButton(enabled = count > 0, onClick = { confirmingClear = true }) { Text("Clear") }
+        TextButton(enabled = count > 0, onClick = { confirmingClear = true }) { Text("Delete all") }
         TextButton(
             enabled = count > 0 && !settings.exporting,
             onClick = settings::exportHistory,
-        ) { Text("Export") }
+        ) { Text(if (settings.exporting) "Exporting…" else "Export") }
     }
 
     // Offered from this composition, so from the activity on screen now, and only once it's
@@ -69,13 +72,13 @@ internal fun HistorySection(state: SettingsState, settings: SettingsViewModel) {
     if (confirmingClear) {
         AlertDialog(
             onDismissRequest = { confirmingClear = false },
-            title = { Text("Clear history?") },
-            text = { Text("Deletes ${checks(count)} kept on this phone. This can't be undone.") },
+            title = { Text("Delete all checks?") },
+            text = { Text("This deletes ${checks(count)} from this phone. It can't be undone.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmingClear = false
                     settings.clearHistory()
-                }) { Text("Clear") }
+                }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { confirmingClear = false }) { Text("Cancel") } },
         )
@@ -99,7 +102,7 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
 /** "312 checks since 9 Oct". */
 private fun keptLabel(kept: KeptHistory): String {
     val since = kept.since
-    return if (kept.count == 0 || since == null) "Nothing kept yet" else "${checks(kept.count)} since ${shortDate(since)}"
+    return if (kept.count == 0 || since == null) "No checks saved" else "${checks(kept.count)} since ${shortDate(since)}"
 }
 
 private fun checks(count: Int) = if (count == 1) "1 check" else "$count checks"
@@ -109,7 +112,7 @@ private fun share(context: Context, exported: Export) {
     val uri = when (exported) {
         is Export.Ready -> exported.uri
         Export.Failed -> {
-            Toast.makeText(context, "Couldn't export history", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Couldn't export history. Try again.", Toast.LENGTH_LONG).show()
             return
         }
     }

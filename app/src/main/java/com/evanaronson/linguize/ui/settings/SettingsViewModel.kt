@@ -48,6 +48,8 @@ data class SettingsState(
     val modelTest: ModelTest? = null,
     /** Whether checks are kept in history. */
     val historyEnabled: Boolean = true,
+    /** The last attempt to save a key failed: the Keystore couldn't encrypt it. */
+    val keySaveFailed: Boolean = false,
 ) {
     val hasKey get() = keys[provider] is KeyStatus.Saved
 }
@@ -74,7 +76,8 @@ sealed interface Export {
 sealed interface ModelTest {
     data object Testing : ModelTest
     data class Works(val millis: Long) : ModelTest
-    data class Failed(val message: String) : ModelTest
+    /** [title] says what went wrong; [detail] is the AI service's own words, when it gave any. */
+    data class Failed(val title: String, val detail: String?) : ModelTest
 }
 
 class SettingsViewModel(private val app: App) : ViewModel() {
@@ -168,7 +171,7 @@ class SettingsViewModel(private val app: App) : ViewModel() {
         testJob?.cancel()
         change { state ->
             app.settings.provider = provider
-            state.copy(provider = provider, model = app.settings.model(provider), modelTest = null)
+            state.copy(provider = provider, model = app.settings.model(provider), modelTest = null, keySaveFailed = false)
         }
         loadModels()
     }
@@ -192,24 +195,28 @@ class SettingsViewModel(private val app: App) : ViewModel() {
             val result = try {
                 ModelTest.Works(checker().testModel(provider, model))
             } catch (failure: CheckFailure) {
-                ModelTest.Failed(failure.detail ?: failure.reason.title)
+                ModelTest.Failed(failure.reason.title, failure.detail)
             }
             change { if (it.provider == provider) it.copy(modelTest = result) else it }
         }
     }
 
-    /** Saves the key for the current provider; a blank value removes it. */
+    /**
+     * Saves the key for the current provider; a blank value removes it. A key that was saved is
+     * tested straight away. If the Keystore couldn't encrypt it, [SettingsState.keySaveFailed] is set.
+     */
     fun saveKey(value: String) {
         val provider = state?.provider ?: return
         viewModelScope.launch {
-            val status = withContext(Dispatchers.IO) {
-                app.keys.set(provider, value)
-                app.keys.status(provider)
+            val (saved, status) = withContext(Dispatchers.IO) {
+                app.keys.set(provider, value) to app.keys.status(provider)
             }
             // A test still running used the key just replaced; its answer says nothing about this one.
             testJob?.cancel()
-            change { it.copy(keys = it.keys + (provider to status), modelTest = null) }
-            if (state?.provider == provider) loadModels()
+            change { it.copy(keys = it.keys + (provider to status), modelTest = null, keySaveFailed = !saved) }
+            if (state?.provider != provider) return@launch
+            loadModels()
+            if (saved && status is KeyStatus.Saved) testModel()
         }
     }
 

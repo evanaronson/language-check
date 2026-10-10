@@ -26,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.evanaronson.linguize.R
 import com.evanaronson.linguize.core.Language
@@ -49,7 +51,12 @@ fun LanguagePicker(selected: Language?, onSelect: (Language?) -> Unit, modifier:
         }
     }
     Column(modifier) {
-        FilledTonalButton(onClick = { open = !open }) {
+        FilledTonalButton(
+            onClick = { open = !open },
+            modifier = Modifier.semantics {
+                contentDescription = "Language: ${label(selected)}, ${selected?.name ?: "detects the language"}"
+            },
+        ) {
             Text(label(selected))
             Spacer(Modifier.width(8.dp))
             Text(if (open) "▴" else "▾", Modifier.clearAndSetSemantics {})

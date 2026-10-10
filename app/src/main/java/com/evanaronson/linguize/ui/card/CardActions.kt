@@ -15,6 +15,8 @@ class CardActions(
     val onOpenSettings: (() -> Unit)?,
     /** Overrides an assumption (by its "about") with the writer's answer and checks again. */
     val onSettle: (about: String, answer: String) -> Unit,
+    /** True for a past check: the assumption chips would do nothing, so the card hides them. */
+    val readOnly: Boolean = false,
 ) {
     companion object {
         /**
@@ -58,6 +60,7 @@ class CardActions(
             onRetry = {},
             onOpenSettings = null,
             onSettle = { _, _ -> },
+            readOnly = true,
         )
     }
 }

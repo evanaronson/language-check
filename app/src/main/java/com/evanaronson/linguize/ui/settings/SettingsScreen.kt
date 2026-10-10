@@ -50,12 +50,19 @@ private fun CheckingSection(state: SettingsState, settings: SettingsViewModel) {
     SectionTitle("Checking")
     val labels = menuLabels()
     MultiSelectDropdown(
-        label = "In the selection menu",
+        label = "Show in selection menu",
         options = MenuEntry.entries,
         selected = state.menu,
-        optionLabel = { entry -> "${labels.getValue(entry)} (${entry.language?.name ?: "auto-detect"})" },
+        optionLabel = { entry -> "${labels.getValue(entry)} (${entry.language?.name ?: "detects the language"})" },
         onToggle = settings::toggleMenuEntry,
     )
+    if (state.menu.size == 1) {
+        Text(
+            "Keep at least one.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
     Dropdown(
         label = "Punctuation",
         selected = state.punctuation.label,
@@ -68,11 +75,17 @@ private fun CheckingSection(state: SettingsState, settings: SettingsViewModel) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    Text("What to suggest", style = MaterialTheme.typography.titleSmall)
     Column(Modifier.selectableGroup()) {
         Judgments.entries.forEach { option ->
             RadioRow(option.label, selected = option == state.judgments, onClick = { settings.setJudgments(option) })
         }
     }
+    Text(
+        "Fixes correct mistakes. Rewordings make it sound more natural.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable

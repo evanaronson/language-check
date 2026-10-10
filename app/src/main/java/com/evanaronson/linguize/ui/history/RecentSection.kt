@@ -38,6 +38,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.evanaronson.linguize.history.Outcome
+import com.evanaronson.linguize.ui.components.DateLocale
 import com.evanaronson.linguize.ui.components.SectionTitle
 import java.time.format.DateTimeFormatter
 
@@ -77,7 +78,7 @@ fun RecentSection(
     if (historyOn == false) HistoryOff(onOpenSettings)
     val shown = rows ?: return
     if (shown.isEmpty()) {
-        if (historyOn == true) Quiet("Checks you make will show up here.")
+        if (historyOn == true) Quiet("Checks from other apps will appear here.")
         return
     }
     val now = System.currentTimeMillis()
@@ -105,13 +106,13 @@ private fun SessionRow(row: RecentRow, now: Long, time: DateTimeFormatter, onCli
             // On the same node as the click, so screen readers offer Delete on the row they're on.
             .semantics {
                 customActions = listOf(
-                    CustomAccessibilityAction("Delete") {
+                    CustomAccessibilityAction("Delete check") {
                         onDelete()
                         true
                     },
                 )
             }
-            .clickable(onClickLabel = "Open", onClick = onClick)
+            .clickable(onClickLabel = "Open check", onClick = onClick)
             .padding(vertical = 12.dp),
     ) {
         Text(
@@ -160,8 +161,8 @@ private fun SwipeToDelete(onDelete: () -> Unit, content: @Composable () -> Unit)
 @Composable
 private fun HistoryOff(onOpenSettings: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Quiet("History is off, so new checks aren't kept.", Modifier.weight(1f))
-        TextButton(onClick = onOpenSettings) { Text("Settings") }
+        Quiet("History is off. New checks aren't saved.", Modifier.weight(1f))
+        TextButton(onClick = onOpenSettings) { Text("Open settings") }
     }
 }
 
@@ -174,5 +175,5 @@ private fun Quiet(text: String, modifier: Modifier = Modifier) {
 @Composable
 internal fun rememberTimeFormat(): DateTimeFormatter {
     val context = LocalContext.current
-    return remember(context) { DateTimeFormatter.ofPattern(if (DateFormat.is24HourFormat(context)) "HH:mm" else "h:mm a") }
+    return remember(context) { DateTimeFormatter.ofPattern(if (DateFormat.is24HourFormat(context)) "HH:mm" else "h:mm a", DateLocale) }
 }

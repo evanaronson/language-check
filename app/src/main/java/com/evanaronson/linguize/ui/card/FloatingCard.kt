@@ -20,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -41,7 +43,7 @@ fun FloatingCard(
     topPadding: Dp = 0.dp,
     header: @Composable () -> Unit = {},
 ) {
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().semantics { paneTitle = "Linguize" }) {
         Box(
             Modifier
                 .matchParentSize()
@@ -49,7 +51,7 @@ fun FloatingCard(
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClickLabel = "Close",
+                    onClickLabel = "Close card",
                     onClick = onDismiss,
                 ),
         )

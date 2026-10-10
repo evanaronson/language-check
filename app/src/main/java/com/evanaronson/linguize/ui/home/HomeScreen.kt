@@ -54,7 +54,7 @@ fun HomeScreen(
         ) {
             Header(onOpenSettings)
             Text(
-                "Select text you wrote in any app, then tap Linguize in the selection menu (it may be under ⋮). Or try it here.",
+                "Select text in any app, then choose Linguize in the selection menu (it may be under ⋮). Or try it below.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

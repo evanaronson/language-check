@@ -33,10 +33,7 @@ import com.evanaronson.linguize.ui.card.CardState
 import com.evanaronson.linguize.ui.card.ResultCard
 import com.evanaronson.linguize.ui.card.title
 import com.evanaronson.linguize.ui.components.BackButton
-import com.evanaronson.linguize.ui.components.shortDate
 import com.evanaronson.linguize.ui.forgetExports
-import java.time.Instant
-import java.time.ZoneId
 
 /**
  * One past check: when and where, the card as it was (read-only), what went back to
@@ -55,7 +52,7 @@ fun SessionScreen(session: SessionViewModel, onBack: () -> Unit) {
         BackButton(onBack)
         when (val page = session.page) {
             SessionPage.Loading -> Unit
-            SessionPage.Missing -> Faint("This check is no longer kept.")
+            SessionPage.Missing -> Faint("This check was deleted.")
             is SessionPage.Shown -> Shown(
                 page,
                 onDelete = {
@@ -77,12 +74,12 @@ private fun Shown(page: SessionPage.Shown, onDelete: () -> Unit) {
     val card = page.card
     // The card shows the text itself only when it has suggestions to show in it.
     val cardShowsText = (card?.result as? CheckResult.Reviewed)?.looksGood == false
-    if (!cardShowsText) TextBlock("Checked", session.text)
+    if (!cardShowsText) TextBlock("Your text", session.text)
     if (card != null) {
         ReadOnlyCard(card)
     } else {
         Text(
-            page.failure?.let { "Couldn't check · ${it.title}" } ?: "Couldn't check",
+            page.failure?.let { "Couldn't check · ${it.title}" } ?: "No result",
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.error,
         )
@@ -95,15 +92,14 @@ private fun Shown(page: SessionPage.Shown, onDelete: () -> Unit) {
 @Composable
 private fun Header(session: SessionRecord, appLabel: String?) {
     val time = rememberTimeFormat()
-    val started = Instant.ofEpochMilli(session.startedAt).atZone(ZoneId.systemDefault())
     Column {
-        Text("${shortDate(session.startedAt)}, ${time.format(started)}", style = MaterialTheme.typography.titleLarge)
+        Text(relativeDate(session.startedAt, System.currentTimeMillis(), time, alwaysTime = true), style = MaterialTheme.typography.titleLarge)
         appLabel?.let { Faint(it) }
     }
 }
 
 /**
- * The card's own content, with nothing to act on: no Replace, and assumptions can't be
+ * The card's own content, with nothing to act on: no Accept, and assumptions can't be
  * changed. Copy only copies; no check stands behind the card, so it can't reach the
  * model or history.
  */
@@ -123,13 +119,13 @@ private fun ReadOnlyCard(card: CardState.Done) {
 private fun WhatCameOfIt(session: SessionRecord) {
     val finalText = session.finalText
     if (finalText != null) {
-        TextBlock("Sent", finalText)
+        TextBlock("Put back in the app", finalText)
         return
     }
     when (session.outcome) {
-        Outcome.Copied -> "Copied; nothing went back to the app."
-        Outcome.None -> "Closed without changes."
-        Outcome.Abandoned -> "Linguize stopped while this card was open."
+        Outcome.Copied -> "Copied. Nothing was put back in the app."
+        Outcome.None -> "Closed. Nothing was put back in the app."
+        Outcome.Abandoned -> "The end of this check wasn't saved. Linguize closed, or History was turned off."
         Outcome.Applied, Outcome.Failed, null -> null
     }?.let { Faint(it) }
 }
@@ -145,7 +141,7 @@ private fun DeleteButton(onDelete: () -> Unit) {
         AlertDialog(
             onDismissRequest = { confirming = false },
             title = { Text("Delete this check?") },
-            text = { Text("It's removed from this phone. This can't be undone.") },
+            text = { Text("It will be deleted from this phone. This can't be undone.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirming = false
