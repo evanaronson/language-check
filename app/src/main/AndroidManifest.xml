@@ -41,7 +41,7 @@
 
         <!--
             Text-selection menu entries. Each label appears in the menu; settings switches
-            them on and off (see menu/SelectionMenu.kt). Only auto-detect is on to begin with.
+            them on and off (see data/SelectionMenu.kt). Only auto-detect is on to begin with.
         -->
         <activity-alias
             android:name=".menu.LinguizeEntry"

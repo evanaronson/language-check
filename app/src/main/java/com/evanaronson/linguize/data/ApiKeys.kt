@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import com.evanaronson.linguize.llm.Provider
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -37,17 +38,27 @@ class ApiKeys(context: Context) : ProviderKeys {
         return KeyStatus.Saved(key.takeLast(4))
     }
 
-    /** Saves [value], or removes the key when it's blank. */
+    /**
+     * Saves [value], or removes the key when it's blank. False when the Keystore couldn't
+     * encrypt it (it can fail on some devices); the stored key is then left as it was.
+     */
     @Synchronized
-    fun set(provider: Provider, value: String) {
+    fun set(provider: Provider, value: String): Boolean {
         val key = value.trim()
         if (key.isEmpty()) {
             prefs.edit().remove(provider.token).apply()
             cache.remove(provider)
-        } else {
-            prefs.edit().putString(provider.token, encrypt(key)).apply()
-            cache[provider] = key
+            return true
         }
+        val sealed = try {
+            encrypt(key)
+        } catch (e: Exception) {
+            Log.w("ApiKeys", "Couldn't encrypt the key", e)
+            return false
+        }
+        prefs.edit().putString(provider.token, sealed).apply()
+        cache[provider] = key
+        return true
     }
 
     private fun secretKey(): SecretKey {

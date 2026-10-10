@@ -1,8 +1,10 @@
 package com.evanaronson.linguize.ui.settings
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +47,12 @@ internal fun OtherAppsSection() {
 /**
  * Opens another app's screen from settings. Marked as not the user leaving, so a
  * card waiting behind settings stays hidden (see `HomeActivity.onUserLeaveHint`).
+ * A phone with nothing to open it (no browser, say) gets a toast instead of a crash.
  */
-internal fun Context.openFromSettings(intent: Intent) =
-    startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION))
+internal fun Context.openFromSettings(intent: Intent) {
+    try {
+        startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION))
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(this, "No app on this phone can open that", Toast.LENGTH_SHORT).show()
+    }
+}
