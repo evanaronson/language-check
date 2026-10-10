@@ -111,14 +111,17 @@ class GeminiClient(private val http: OkHttpClient, private val prompt: Prompt) :
 
         /** An HTTP error, with what Gemini's own errors say on top of the status code. */
         fun failure(code: Int, payload: String): CheckFailure {
-            val lower = payload.lowercase()
             val reason = when {
-                code == 400 && "api_key_invalid" in lower -> CheckFailure.Reason.BadKey
+                code == 400 && "api_key_invalid" in payload.lowercase() -> CheckFailure.Reason.BadKey
                 // Gemini answers 403 for models a key isn't allowed to use, and 400 for options a model doesn't support.
-                (code == 403 || code == 400) && "model" in lower -> CheckFailure.Reason.BadModel
+                // Only the message says which: a blocked key's names the method ("ModelService.ListModels"), not a model.
+                (code == 403 || code == 400) && MODEL_WORD.containsMatchIn(errorMessage(payload).orEmpty()) -> CheckFailure.Reason.BadModel
                 else -> null
             }
             return failureFor(code, payload, reason)
         }
+
+        /** "model" or "models" as a word of its own, not inside a service's name. */
+        private val MODEL_WORD = Regex("""\bmodels?\b""", RegexOption.IGNORE_CASE)
     }
 }

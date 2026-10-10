@@ -50,8 +50,7 @@ internal class OverlayWindow(private val context: Context, private val onBack: (
         LayoutParams.MATCH_PARENT,
         LayoutParams.MATCH_PARENT,
         LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-        // Focusable, for Back, but not for the input method: the app keeps its keyboard and field.
-        LayoutParams.FLAG_ALT_FOCUSABLE_IM or LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+        windowFlags(hidden = false),
         PixelFormat.TRANSLUCENT,
     )
     private var root: View? = null
@@ -81,7 +80,7 @@ internal class OverlayWindow(private val context: Context, private val onBack: (
         }
     }
 
-    /** When the window was last hidden, on the uptime clock; null while it's shown. */
+    /** When the window was last hidden, on the elapsed-realtime clock; null while it's shown. */
     var hiddenSince: Long? = null
         private set
 
@@ -96,8 +95,7 @@ internal class OverlayWindow(private val context: Context, private val onBack: (
             hiddenSince = if (value) SystemClock.elapsedRealtime() else null
             val root = root ?: return
             root.visibility = if (value) View.INVISIBLE else View.VISIBLE
-            val passThrough = LayoutParams.FLAG_NOT_TOUCHABLE or LayoutParams.FLAG_NOT_FOCUSABLE
-            params.flags = if (value) params.flags or passThrough else params.flags and passThrough.inv()
+            params.flags = windowFlags(hidden = value)
             windowManager.updateViewLayout(root, params)
         }
 
@@ -114,6 +112,20 @@ internal class OverlayWindow(private val context: Context, private val onBack: (
         viewModelStore.clear()
     }
 }
+
+/**
+ * The window's flags. Shown, it's focusable, for Back, but not for the input method: the app
+ * keeps its keyboard and field. Hidden, it takes no touches or keys, and must not be an
+ * input-method target either: [LayoutParams.FLAG_ALT_FOCUSABLE_IM] inverts what
+ * [LayoutParams.FLAG_NOT_FOCUSABLE] says about the keyboard, so keeping it would leave the
+ * invisible overlay above the app behind it (Settings) as what the keyboard is placed against.
+ */
+internal fun windowFlags(hidden: Boolean): Int =
+    if (hidden) {
+        LayoutParams.FLAG_LAYOUT_IN_SCREEN or LayoutParams.FLAG_NOT_FOCUSABLE or LayoutParams.FLAG_NOT_TOUCHABLE
+    } else {
+        LayoutParams.FLAG_LAYOUT_IN_SCREEN or LayoutParams.FLAG_ALT_FOCUSABLE_IM
+    }
 
 /** The window's root: answers the Back key itself, on versions and apps that still send it as a key. */
 private class BackKeyLayout(context: Context, private val onBack: () -> Unit) : FrameLayout(context) {

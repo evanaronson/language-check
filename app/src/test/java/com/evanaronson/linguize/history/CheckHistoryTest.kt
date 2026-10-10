@@ -484,6 +484,43 @@ class CheckHistoryTest {
     }
 
     @Test
+    fun aCardThatStoppedBeingRecordedIsntRecordedAgainWhenItsLanguageChanges() = runBlocking<Unit> {
+        history.firstAttempt(rain, opening, ask = { "model" }, reuse = { null })
+        history.succeeded(emptyList(), "{}", result)
+        history.flush()
+        // Turned off from Settings while the card is up: the next write stops the recording.
+        environment.enabled = false
+        history.languageChanged(rain, opening.copy(requestedLanguage = "es"), ask = { "model" }, reuse = { null })
+        history.succeeded(emptyList(), "{}", result)
+        // Turned on again, and another language picked on the same card.
+        environment.enabled = true
+        history.languageChanged(rain, opening.copy(requestedLanguage = null), ask = { "model" }, reuse = { null })
+        history.succeeded(emptyList(), "{}", result)
+        assertNull(history.session)
+        history.close(null)
+        history.flush()
+        assertEquals(listOf("save", "save"), store.calls.map { it.first })
+        assertEquals(1, store.calls.map { it.second.id }.distinct().size)
+    }
+
+    @Test
+    fun aCardOpenedWithHistoryOffStaysUnrecordedWhenItsLanguageChanges() = runBlocking<Unit> {
+        environment.enabled = false
+        history.firstAttempt(rain, opening, ask = { "model" }, reuse = { null })
+        environment.enabled = true
+        history.languageChanged(rain, opening.copy(requestedLanguage = "es"), ask = { "model" }, reuse = { null })
+        history.succeeded(emptyList(), "{}", result)
+        history.close(null)
+        history.flush()
+        assertTrue(store.calls.isEmpty())
+        assertTrue(store.lookedUp.isEmpty())
+        // The next card is recorded.
+        history.firstAttempt(rain, opening, ask = { "model" }, reuse = { null })
+        history.flush()
+        assertEquals(listOf("save"), store.calls.map { it.first })
+    }
+
+    @Test
     fun theStatusFollowsTheResult() {
         assertEquals(Verdict.Status.Ok, CheckHistory.statusOf(result))
         assertEquals(Verdict.Status.Unclear, CheckHistory.statusOf(CheckResult.Unclear))

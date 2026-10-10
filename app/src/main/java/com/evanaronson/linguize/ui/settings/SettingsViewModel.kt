@@ -80,6 +80,7 @@ sealed interface ModelTest {
 class SettingsViewModel(private val app: App) : ViewModel() {
     private var modelsJob: Job? = null
     private var testJob: Job? = null
+    private var modelsRequested = false
     private val exports = Exports(app.cacheDir)
 
     /** Selection-menu writes, one at a time (see [toggleMenuEntry]). */
@@ -124,8 +125,16 @@ class SettingsViewModel(private val app: App) : ViewModel() {
                     historyEnabled = settings.historyEnabled,
                 )
             }
-            loadModels()
         }
+    }
+
+    /**
+     * The settings screen is showing: reads the provider's model list the first time. Not
+     * before, so that Home, which only reads a setting or two, doesn't send the key to the
+     * provider on every launch.
+     */
+    fun showModels() {
+        if (!modelsRequested) loadModels()
     }
 
     /** Adds or removes a selection-menu entry; the last one can't be removed. */
@@ -156,6 +165,7 @@ class SettingsViewModel(private val app: App) : ViewModel() {
     }
 
     fun selectProvider(provider: Provider) {
+        testJob?.cancel()
         change { state ->
             app.settings.provider = provider
             state.copy(provider = provider, model = app.settings.model(provider), modelTest = null)
@@ -180,7 +190,7 @@ class SettingsViewModel(private val app: App) : ViewModel() {
         change { it.copy(modelTest = ModelTest.Testing) }
         testJob = viewModelScope.launch {
             val result = try {
-                ModelTest.Works(app.checker.testModel(provider, model))
+                ModelTest.Works(checker().testModel(provider, model))
             } catch (failure: CheckFailure) {
                 ModelTest.Failed(failure.detail ?: failure.reason.title)
             }
@@ -196,6 +206,8 @@ class SettingsViewModel(private val app: App) : ViewModel() {
                 app.keys.set(provider, value)
                 app.keys.status(provider)
             }
+            // A test still running used the key just replaced; its answer says nothing about this one.
+            testJob?.cancel()
             change { it.copy(keys = it.keys + (provider to status), modelTest = null) }
             if (state?.provider == provider) loadModels()
         }
@@ -272,8 +284,12 @@ class SettingsViewModel(private val app: App) : ViewModel() {
         return null
     }
 
+    /** The app's checker; making it reads the prompt from assets, so not on the main thread. */
+    private suspend fun checker() = withContext(Dispatchers.Default) { app.checker }
+
     private fun loadModels() {
         val current = state ?: return
+        modelsRequested = true
         val provider = current.provider
         modelsJob?.cancel()
         if (!current.hasKey) {
@@ -283,7 +299,7 @@ class SettingsViewModel(private val app: App) : ViewModel() {
         change { it.copy(models = ModelList.Loading) }
         modelsJob = viewModelScope.launch {
             val models = try {
-                ModelList.Loaded(app.checker.models(provider))
+                ModelList.Loaded(checker().models(provider))
             } catch (_: CheckFailure) {
                 ModelList.Failed
             }

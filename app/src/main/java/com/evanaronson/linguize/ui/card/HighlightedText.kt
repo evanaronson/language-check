@@ -139,16 +139,18 @@ fun HighlightedText(text: String, changes: List<Highlight>, accent: Color, onRep
                 explanation.bringIntoView()
             }
         }
-        // Keeps showing the last explanation while it animates away.
-        val lastShown = remember { arrayOfNulls<Highlight>(1) }
-        if (shown != null) lastShown[0] = shown
+        // Keeps showing the last explanation while it animates away. Its replacement is kept
+        // with it: the change can leave because another one was accepted (a rewording retires
+        // the fixes it touches), and then its range no longer fits the shorter text.
+        val lastShown = remember { arrayOfNulls<Pair<Highlight, String>>(1) }
+        if (shown != null) lastShown[0] = shown to text.substring(shown.range)
         AnimatedVisibility(visible = shown != null) {
-            val change = lastShown[0] ?: return@AnimatedVisibility
+            val (change, replacement) = lastShown[0] ?: return@AnimatedVisibility
             Column(Modifier.bringIntoViewRequester(explanation)) {
                 Spacer(Modifier.height(8.dp))
                 Explanation(
                     change,
-                    text.substring(change.range),
+                    replacement,
                     accent,
                     onReplace = onReplace?.let { replace -> { selectedId = null; replace(change.id) } },
                 )

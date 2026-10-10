@@ -31,6 +31,14 @@ class GeminiClientTest {
         }
     }
 
+    /** A key restricted from the models list is a key problem; "ModelService" in the message isn't a model. */
+    @Test
+    fun aBlockedMethodIsNotABadModel() {
+        val payload = """{"error":{"code":403,"message":"Requests to this API generativelanguage.googleapis.com method """ +
+            """google.ai.generativelanguage.v1beta.ModelService.ListModels are blocked.","details":[{"metadata":{"model":"x"}}]}}"""
+        assertEquals(Reason.BadKey, GeminiClient.failure(403, payload).reason)
+    }
+
     @Test
     fun anAnswerCutOffAtTheTokenLimitIsTooLong() {
         val payload = """{"candidates":[{"content":{"parts":[{"text":"{\"status\":\"ok\",\"mean"}]},"finishReason":"MAX_TOKENS"}]}"""

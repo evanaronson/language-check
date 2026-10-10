@@ -87,7 +87,7 @@ class OpenAIClient(private val http: OkHttpClient, private val prompt: Prompt) :
             val error = errorObject(payload)
             val errorCode = error?.get("code")?.let { runCatching { it.jsonPrimitive.content }.getOrNull() }
             val param = error?.get("param")?.let { runCatching { it.jsonPrimitive.content }.getOrNull() }
-            val message = error?.get("message")?.let { runCatching { it.jsonPrimitive.content }.getOrNull() }.orEmpty()
+            val message = errorMessage(payload).orEmpty()
             val reason = when {
                 errorCode == "invalid_api_key" -> CheckFailure.Reason.BadKey
                 errorCode == "model_not_found" -> CheckFailure.Reason.BadModel

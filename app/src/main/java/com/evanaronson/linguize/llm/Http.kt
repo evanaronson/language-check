@@ -114,8 +114,8 @@ internal fun errorObject(payload: String): JsonObject? = runCatching {
     Json.parseToJsonElement(payload).jsonObject["error"]?.jsonObject
 }.getOrNull()
 
-/** The `error.message` field both Gemini and OpenAI use, or null. */
-private fun errorMessage(payload: String): String? = runCatching {
+/** The `error.message` field both Gemini and OpenAI use, trimmed, or null. */
+internal fun errorMessage(payload: String): String? = runCatching {
     errorObject(payload)?.get("message")?.jsonPrimitive?.content
 }.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }
 

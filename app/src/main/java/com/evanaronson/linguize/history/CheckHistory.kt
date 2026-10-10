@@ -74,7 +74,8 @@ data class Answer<T>(val value: T, val reused: Kept?)
  * - Writes never hold up the card: they're queued on [scope] (which outlives the screen)
  *   in the order they were made, and their failures are only logged.
  * - [HistoryEnvironment.enabled] is read before every write. Turned off while a card is
- *   open, the open session stops being recorded: nothing more is written for it.
+ *   open, the open session stops being recorded: nothing more is written for it, even
+ *   when it's turned on again while the card is up.
  * - Only checks of text from other apps are recorded ([Origin.recorded]): one started in
  *   the app itself ("Try it") opens no session, looks up nothing and writes nothing.
  * - A text over [maxChars] isn't recorded: the check refuses it before any request.
@@ -103,8 +104,13 @@ class CheckHistory(
     /** The open session's record; null when history is off or no card is open. */
     private var recording: SessionRecording? = null
 
-    /** What [recording] was opened with. */
-    private var opening: Opening? = null
+    /**
+     * Whether the card's session has been decided, opened or refused ([open] got past
+     * reading the environment, or found the check isn't recorded), until [close]. Once it
+     * has, a language change never opens one: a card that wasn't recorded from its start,
+     * or stopped being recorded when history was turned off, stays unrecorded.
+     */
+    private var decided = false
 
     /** The last write queued, so writes land in the order they were made. */
     private var lastWrite: Job? = null
@@ -133,8 +139,9 @@ class CheckHistory(
      * now): the open session gets the attempt, so a card is one session however often its
      * language changes. The revision it offered is superseded ([SessionRecording.changeLanguage]).
      * Like [firstAttempt], starts [ask] at once and races it against a kept verdict for the
-     * text in the new language. When no session is open (the first check was cancelled
-     * before it opened one), opens one as [firstAttempt] would.
+     * text in the new language. When the card's first check was cancelled before it opened
+     * its session, opens one as [firstAttempt] would; a card that isn't recorded (history
+     * was off, or turned off since) stays unrecorded.
      */
     suspend fun <T> languageChanged(
         text: String,
@@ -188,20 +195,18 @@ class CheckHistory(
      */
     fun recheck(opening: Opening) {
         val recording = recording ?: return
-        if (opening == this.opening) return
-        quietly("change the settings") { recording.runWith(opening.requestedLanguage, opening.settings) } ?: return
-        this.opening = opening
+        quietly("change the settings") { recording.runWith(opening.requestedLanguage, opening.settings) }
     }
 
     /**
      * Before the attempt in another language: the open session's next attempts run with
-     * [opening]'s language and settings, and its card starts over; or, when none is open,
-     * one is opened. Returns what a kept verdict must match, or null when nothing is recorded.
+     * [opening]'s language and settings, and its card starts over; or, when the card's first
+     * check didn't get as far as [open], one is opened. Returns what a kept verdict must
+     * match, or null when nothing is recorded.
      */
     private suspend fun switchLanguage(text: String, opening: Opening): ReuseKey? {
-        val recording = recording ?: return open(text, opening)?.reuseKey
+        val recording = recording ?: return if (decided) null else open(text, opening)?.reuseKey
         quietly("change the language") { recording.changeLanguage(opening.requestedLanguage, opening.settings, clock()) } ?: return null
-        this.opening = opening
         return ReuseKey(recording.session.textHash, opening.requestedLanguage, opening.settings)
     }
 
@@ -212,18 +217,23 @@ class CheckHistory(
      */
     internal suspend fun open(text: String, opening: Opening): SessionRecord? {
         recording = null
-        this.opening = null
-        if (!opening.origin.recorded || text.length > maxChars) return null
-        val context = withContext(io) {
-            quietly("open a session") {
-                if (!environment.enabled) return@quietly null
-                SessionContext(opening, appVersion = environment.appVersion, deviceId = environment.deviceId)
+        decided = false
+        val context = if (opening.origin.recorded && text.length <= maxChars) {
+            withContext(io) {
+                quietly("open a session") {
+                    if (!environment.enabled) return@quietly null
+                    SessionContext(opening, appVersion = environment.appVersion, deviceId = environment.deviceId)
+                }
             }
-        } ?: return null
-        val opened = quietly("open a session") { SessionRecording(text, context, clock(), newId) } ?: return null
-        recording = opened
-        this.opening = opening
-        val session = opened.session
+        } else {
+            null
+        }
+        // Decided, either way; a cancellation while the environment was read leaves it undecided.
+        decided = true
+        context ?: return null
+        val started = quietly("open a session") { SessionRecording(text, context, clock(), newId) } ?: return null
+        recording = started
+        val session = started.session
         write("save a session") { store.save(session) }
         return session.takeIf { recording != null }
     }
@@ -272,9 +282,9 @@ class CheckHistory(
 
     /** Closes the open session, if any, with what went back to the app ([finalText], null for nothing). */
     fun close(finalText: String?) {
+        decided = false
         val recording = recording ?: return
         this.recording = null
-        opening = null
         val closed = quietly("close a session") { recording.close(clock(), finalText) } ?: return
         write("write a closed session") { store.close(closed.session, closed.suggestions) }
     }
@@ -314,7 +324,6 @@ class CheckHistory(
     private fun write(what: String, block: suspend () -> Unit) {
         if (quietly("read whether history is on") { environment.enabled } != true) {
             recording = null
-            opening = null
             return
         }
         val previous = lastWrite

@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -36,6 +37,7 @@ fun SettingsScreen(settings: SettingsViewModel, onBack: () -> Unit) {
         Text("Settings", style = MaterialTheme.typography.headlineSmall)
         // The saved settings load in a moment; showing defaults first would flash the wrong choices.
         val state = settings.state ?: return@Column
+        LaunchedEffect(Unit) { settings.showModels() }
         CheckingSection(state, settings)
         ModelSection(state, settings)
         HistorySection(state, settings)

@@ -49,4 +49,16 @@ class PrivateFieldTest {
         assertTrue(PrivateField.matches(text, "CVV", null))
         assertTrue(PrivateField.matches(text, "PIN", null))
     }
+
+    @Test
+    fun catalanAndSpanishNamesAreRecognisedWithOrWithoutAccents() {
+        assertTrue(PrivateField.matches(text, "Contrasenya", null))
+        assertTrue(PrivateField.matches(text, "Contraseña", null))
+        assertTrue(PrivateField.matches(text, "Código de verificación", null))
+        assertTrue(PrivateField.matches(text, "Codi de verificació", null))
+        assertTrue(PrivateField.matches(text, "Número de tarjeta", null))
+        assertTrue(PrivateField.matches(text, null, "com.banc:id/num_targeta"))
+        assertFalse(PrivateField.matches(message, "Escriu un missatge", "com.chat:id/entry"))
+        assertFalse(PrivateField.matches(message, "Código postal de la tienda", null))
+    }
 }

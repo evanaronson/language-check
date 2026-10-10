@@ -1,6 +1,7 @@
 package com.evanaronson.linguize.accessibility
 
 import android.text.InputType
+import java.text.Normalizer
 
 /**
  * Whether a text field looks like it holds private details rather than writing:
@@ -20,9 +21,14 @@ internal object PrivateField {
         else -> false
     }
 
-    /** "otp_input", "cardNumber" and "Enter the verification code" all name what they hold. */
+    /**
+     * "otp_input", "cardNumber" and "Enter the verification code" all name what they hold;
+     * so do "Contrasenya" and "Número de tarjeta", for the writers Linguize is made for.
+     */
     private fun soundsPrivate(name: String): Boolean {
-        val words = name
+        // Accents go first, or "contraseña" and "código" would break apart at the letter.
+        val words = Normalizer.normalize(name, Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
             .replace(Regex("([a-z])([A-Z])"), "$1 $2")
             .lowercase()
             .replace(Regex("[^a-z0-9]+"), " ")
@@ -42,6 +48,6 @@ internal object PrivateField {
      * is a message; those fields are recognised by their input type instead.
      */
     private val PRIVATE_WORDS = Regex(
-        """\b(otp|one ?time (code|password|pin)|passcode|password|passwd|pin|cvv|cvc|iban|card ?(number|num|no)|cc ?(number|num)|(verification|security|confirmation|auth|sms) ?code)\b""",
+        """\b(otp|one ?time (code|password|pin)|passcode|password|passwd|pin|cvv|cvc|iban|card ?(number|num|no)|cc ?(number|num)|(verification|security|confirmation|auth|sms) ?code|contrasenya|contrasena|(codigo|codi) (de )?(verificacion|verificacio|seguridad|seguretat|confirmacion|confirmacio|sms)|(numero|num) (de )?(tarjeta|targeta))\b""",
     )
 }

@@ -16,7 +16,7 @@ Replace what you want, in-line, and you're back where you were.
 
 ## Install
 
-**[Download the latest APK](https://github.com/evanaronson/linguize/releases/latest/download/linguize.apk)**. Every push to `main` builds a new one; older builds are under [Releases](https://github.com/evanaronson/linguize/releases).
+**[Download the latest APK](https://github.com/evanaronson/linguize/releases/latest/download/linguize.apk)**. Every push to `main` that changes the app builds a new one; older builds are under [Releases](https://github.com/evanaronson/linguize/releases).
 
 1. Open the link on your phone and open the downloaded file. When Android asks, allow your browser to install unknown apps.
 2. Open **Linguize**, pick Google Gemini or OpenAI, paste that provider's API key ([Gemini](https://aistudio.google.com/apikey), [OpenAI](https://platform.openai.com/api-keys)) and tap Save. Keys are stored encrypted on the phone and are never in the code.
@@ -88,6 +88,6 @@ You need JDK 21 (the Robolectric tests need it) and the Android SDK. `./gradlew 
 
 ### How releases are built and signed
 
-`.github/workflows/build.yml` has two jobs. **build** runs the tests and `assembleRelease` with no secrets and read-only access, and uploads the unsigned APK. **sign-and-publish** runs no code from the repo: it downloads that APK, signs it with the runner's own `apksigner`, verifies the signature, attests its provenance and publishes the release, with the certificate's SHA-256 fingerprint in the notes. Its key lives only in the `signing` GitHub environment (`SIGNING_KEYSTORE_BASE64`, a base64 PKCS12 keystore, plus `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS` and `SIGNING_KEY_PASSWORD`), which only `main` and `feature/*` may use. Without them the job stops with an error saying which are missing.
+`.github/workflows/build.yml` builds in two jobs. **build** runs the tests and `assembleRelease` with no secrets and read-only access, and uploads the unsigned APK. **sign-and-publish** runs no code from the repo: it downloads that APK, signs it with the runner's own `apksigner`, verifies the signature, attests its provenance and publishes the release, with the certificate's SHA-256 fingerprint in the notes. Its key lives only in the `signing` GitHub environment (`SIGNING_KEYSTORE_BASE64`, a base64 PKCS12 keystore, plus `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS` and `SIGNING_KEY_PASSWORD`), which only `main` and `feature/*` may use. Without them the job stops with an error saying which are missing.
 
 Gradle checks what it downloads against two files: `distributionSha256Sum` in `gradle/wrapper/gradle-wrapper.properties` pins the Gradle distribution, and `gradle/verification-metadata.xml` pins the SHA-256 of every plugin and library. To write them, and again after changing the Gradle version or any dependency, run the workflow by hand with **pin_build_inputs** checked (`gh workflow run build.yml --ref <branch> -f pin_build_inputs=true`); it uploads both files, regenerated, as the `build-inputs` artifact to review and commit.
