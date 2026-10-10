@@ -27,7 +27,7 @@ data class Revision(
     private val accepted: Set<Int> = steps.flatten().toSet()
 
     /** Accepted changes that show in the text: a fix a rewording replaced doesn't count. */
-    val acceptedCount get() = applied(acceptedEdits).size
+    val acceptedCount get() = shown(acceptedEdits).size
     val canUndo get() = steps.isNotEmpty()
 
     fun edits(kind: EditKind) = edits.filter { it.kind == kind }
@@ -78,10 +78,10 @@ data class Revision(
     }
 
     /** The text with accepted edits applied: what goes back to the app. */
-    val workingText: String get() = render(original, applied(acceptedEdits)).text
+    val workingText: String get() = render(original, shown(acceptedEdits)).text
 
     /** The working text with all of [kind]'s remaining edits applied too, and where they sit. */
-    fun preview(kind: EditKind): Rendered = render(original, applied(acceptedEdits + remaining(kind)))
+    fun preview(kind: EditKind): Rendered = render(original, shown(acceptedEdits + remaining(kind)))
 
     /** Whether edit [id] is accepted and shows in the working text: not a fix an accepted rewording replaced. */
     fun isApplied(id: Int) = edits.any { it.id == id && id in accepted && !retired(it) }
@@ -92,9 +92,9 @@ data class Revision(
     /** A fix touched by an accepted rewording. */
     private fun retired(edit: Edit) =
         edit.kind == EditKind.Fix && edits.any { it.id in accepted && it.kind == EditKind.Natural && it.touches(edit) }
+}
 
-    /** [edits] without the fixes that a rewording among them replaces. */
-    private fun applied(edits: List<Edit>) = edits.filterNot { fix ->
-        fix.kind == EditKind.Fix && edits.any { it.kind == EditKind.Natural && it.touches(fix) }
-    }
+/** [edits] without the fixes that a rewording among them replaces: what of them shows in the text. */
+internal fun shown(edits: List<Edit>) = edits.filterNot { fix ->
+    fix.kind == EditKind.Fix && edits.any { it.kind == EditKind.Natural && it.touches(fix) }
 }

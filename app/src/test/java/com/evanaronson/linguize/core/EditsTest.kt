@@ -187,13 +187,15 @@ class EditsTest {
         // Pieces of an address inserted as separate fixes.
         assertEquals(emptyList<Any>(), revision("hola", corrected = "hola evil.com").edits)
         assertEquals(emptyList<Any>(), revision("hola evil com", corrected = "hola evil.com").edits)
+        // Pieces that add a link only when some of them are accepted: "evil.com" without the "!".
+        assertEquals(emptyList<Any>(), revision("hola evil 1", corrected = "hola evi!.com").edits)
 
         // A link already in the text, and abbreviations, are fine.
         assertEquals(
             listOf("mira" to "Mira", "" to "."),
             revision("mira https://ejemplo.com", corrected = "Mira https://ejemplo.com.").changes(EditKind.Fix),
         )
-        assertEquals("vivo en EE.UU.", revision("vivo en eeuu", corrected = "vivo en EE.UU.").preview(EditKind.Fix).text)
+        assertEquals("vivo en EE.UU.", revision("vivo en EE UU", corrected = "vivo en EE.UU.").preview(EditKind.Fix).text)
         // Words a missing space joins look like an address, but fixing their accents adds none.
         assertEquals("estás. Bien", revision("estas.Bien", corrected = "estás. Bien").preview(EditKind.Fix).text)
     }

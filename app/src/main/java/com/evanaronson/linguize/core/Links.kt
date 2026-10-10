@@ -13,22 +13,26 @@ internal object Links {
     /** How far a run of text around an edit is looked at, each way. */
     private const val REACH = 1000
 
+    /** The most edits that can share a run of text for every combination of them to be tried; more aren't offered. */
+    private const val MOST_TOGETHER = 8
+
     /**
      * [edits] without those that would add a link ("https://…", "www.…", "example.com")
-     * to [original]: on their own, together with the other edits of their kind, or as the
-     * rewordings together with the fixes those leave on offer.
+     * to [original] in any combination the writer can accept. Edits that add no link on
+     * their own, nor all together, may still add one when only some of them are accepted
+     * ("ab 1" → "a!.cd": the "." and "cd" without the "!"), so every combination of the
+     * edits that can end up in one run of text without spaces is tried, and if any adds
+     * a link, none of those edits is offered.
      */
     fun withoutNew(original: String, edits: List<Edit>): List<Edit> {
         val known = fold(original)
-        val fixes = edits.filter { it.kind == EditKind.Fix }
-        val naturals = edits.filter { it.kind == EditKind.Natural }
-        val together = naturals + fixes.filterNot { fix -> naturals.any { it.touches(fix) } }
-        val linking = linking(original, known, fixes) + linking(original, known, naturals) + linking(original, known, together) +
-            edits.filter { edit ->
-                val text = before(original, edit.start) + edit.replacement + after(original, edit.end)
-                hasNew(known, text)
-            }.map { it.id }
-        return edits.filterNot { it.id in linking }
+        val linking = runs(original, edits).filterNot { run ->
+            run.size <= MOST_TOGETHER && (1 until (1 shl run.size)).none { mask ->
+                linking(original, known, shown(run.filterIndexed { k, _ -> mask shr k and 1 == 1 }))
+            }
+        }
+        val dropped = linking.flatten().map { it.id }.toSet()
+        return edits.filterNot { it.id in dropped }
     }
 
     /** Whether [text] holds a link that [original] doesn't. */
@@ -42,25 +46,56 @@ internal object Links {
     private fun isAbbreviation(match: String) =
         match.split('.').all { it.length <= 2 && it.all(Char::isUpperCase) }
 
-    /** Ids of [edits] that, applied together to [original], sit in a run of text without spaces holding a new link. */
-    private fun linking(original: String, known: String, edits: List<Edit>): Set<Int> {
+    /**
+     * [edits] grouped by the stretch of [original] between two spaces that stay spaces
+     * whichever edits are accepted: no edit that could take one out (one whose replacement
+     * has no space) covers it. Every run of text without spaces, in every combination of
+     * edits, lies within one stretch. An edit across such a space belongs to the stretches
+     * on both sides of it, the parts of its replacement around its spaces being in them.
+     */
+    private fun runs(original: String, edits: List<Edit>): Collection<List<Edit>> {
+        val bridging = IntArray(original.length + 1)
+        for (edit in edits) {
+            if (edit.replacement.none(Char::isWhitespace)) {
+                bridging[edit.start]++
+                bridging[edit.end]--
+            }
+        }
+        // How many spaces that stay spaces come before each position.
+        val spacesBefore = IntArray(original.length + 1)
+        var covering = 0
+        for (k in original.indices) {
+            covering += bridging[k]
+            spacesBefore[k + 1] = spacesBefore[k] + if (covering == 0 && original[k].isWhitespace()) 1 else 0
+        }
+        val runs = mutableMapOf<Int, MutableList<Edit>>()
+        for (edit in edits) {
+            for (run in spacesBefore[edit.start]..spacesBefore[edit.end]) runs.getOrPut(run) { mutableListOf() } += edit
+        }
+        return runs.values
+    }
+
+    /**
+     * Whether [edits], applied together to [original], put a new link in a run of text
+     * without spaces around any of them. Only as much of the text as those runs can reach
+     * is put together.
+     */
+    private fun linking(original: String, known: String, edits: List<Edit>): Boolean {
+        val sorted = edits.sortedWith(editOrder)
         val out = StringBuilder()
-        val placed = mutableListOf<Triple<Int, Int, Int>>()
-        var pos = 0
-        for (edit in edits.sortedWith(editOrder)) {
+        val placed = mutableListOf<IntRange>()
+        var pos = maxOf(0, sorted.first().start - REACH)
+        for (edit in sorted) {
             if (edit.start < pos) continue
             out.append(original, pos, edit.start)
             val start = out.length
             out.append(edit.replacement)
-            placed += Triple(edit.id, start, out.length)
+            placed += start until out.length
             pos = edit.end
         }
-        out.append(original, pos, original.length)
+        out.append(original, pos, minOf(original.length, pos + REACH))
         val text = out.toString()
-        return placed
-            .filter { (_, start, end) -> hasNew(known, before(text, start) + text.substring(start, end) + after(text, end)) }
-            .map { it.first }
-            .toSet()
+        return placed.any { hasNew(known, before(text, it.first) + text.substring(it.first, it.last + 1) + after(text, it.last + 1)) }
     }
 
     /** The text without spaces that runs up to [at]. */
