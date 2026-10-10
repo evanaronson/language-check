@@ -50,14 +50,15 @@ fun LanguagePicker(selected: Language?, onSelect: (Language?) -> Unit, modifier:
             list.bringIntoView()
         }
     }
+    val name = label(selected)
     Column(modifier) {
         FilledTonalButton(
             onClick = { open = !open },
             modifier = Modifier.semantics {
-                contentDescription = "Language: ${label(selected)}, ${selected?.name ?: "detects the language"}"
+                contentDescription = "Language: $name, ${selected?.name ?: "detects the language"}"
             },
         ) {
-            Text(label(selected))
+            Text(name)
             Spacer(Modifier.width(8.dp))
             Text(if (open) "▴" else "▾", Modifier.clearAndSetSemantics {})
         }
