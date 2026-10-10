@@ -51,8 +51,15 @@ class SqliteHistoryStoreTest {
         appVersion = "1.0",
     )
 
-    private fun SessionRecord.answered(at: Long, verdict: String? = """{"status":"ok"}""", failure: String? = null) =
-        copy(updatedAt = at, attempts = attempts + Attempt(at, raw = verdict, failure = failure), status = Verdict.Status.Ok.takeIf { failure == null })
+    /** An attempt that ran with the session's language and settings, as `SessionRecording` records it. */
+    private fun SessionRecord.answered(at: Long, verdict: String? = """{"status":"ok"}""", failure: String? = null) = copy(
+        updatedAt = at,
+        attempts = attempts + Attempt(
+            at, raw = verdict, failure = failure, requestedLanguage = requestedLanguage, nativeLanguage = nativeLanguage,
+            punctuation = punctuation, judgments = judgments, provider = provider, model = model, promptHash = promptHash,
+        ),
+        status = Verdict.Status.Ok.takeIf { failure == null },
+    )
 
     private fun SessionRecord.closed(at: Long, outcome: Outcome = Outcome.None) = copy(updatedAt = at, closedAt = at, outcome = outcome)
 
@@ -200,6 +207,13 @@ class SqliteHistoryStoreTest {
         val stillOpen = open("s4", 5_000, model = "open").answered(5_500)
         store.save(stillOpen)
         assertNull(store.reusable(stillOpen.reuseKey, since = 4_000))
+
+        // Not one whose card ended on an answer made with other settings, though its latest
+        // attempt matches: the re-check with the new model offered nothing to review.
+        val changed = open("s5", 5_000, model = "before").answered(5_200).copy(model = "after").answered(5_500).closed(6_000)
+        store.close(changed, listOf(suggestion(changed, "g5", EditKind.Fix, Decision.Ignored, attempt = 0)))
+        assertEquals(0, store.detail("s5")!!.decidedAttempt())
+        assertNull(store.reusable(changed.reuseKey, since = 4_000))
     }
 
     @Test

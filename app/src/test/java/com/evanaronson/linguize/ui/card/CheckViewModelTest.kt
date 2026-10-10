@@ -28,7 +28,6 @@ import com.evanaronson.linguize.history.SessionContext
 import com.evanaronson.linguize.history.SessionDetail
 import com.evanaronson.linguize.history.SessionRecord
 import com.evanaronson.linguize.history.SessionRecording
-import com.evanaronson.linguize.history.SessionSettings
 import com.evanaronson.linguize.history.SessionSummary
 import com.evanaronson.linguize.history.SuggestionRecord
 import com.evanaronson.linguize.llm.CheckFailure
@@ -40,6 +39,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -331,7 +331,8 @@ class CheckViewModelTest {
 
     /** A session on [QUESTION] closed earlier, whose one attempt the model answered with [QUESTION_JSON]. */
     private fun keptSession(settled: List<Settled>): SessionDetail {
-        val settings = SessionSettings("English", "moderate", "both", "gemini", "m", "p")
+        // Made with the settings the check runs with: a kept answer is only shown for those.
+        val settings = runBlocking { checker.context().stored }
         val context = SessionContext(Opening(Origin.Menu, null, null, settings), appVersion = "1.0", deviceId = "device")
         val recording = SessionRecording(QUESTION, context, 500, newId = { "earlier" })
         recording.attempt(600, settled, QUESTION_JSON, null, null, null, null)
