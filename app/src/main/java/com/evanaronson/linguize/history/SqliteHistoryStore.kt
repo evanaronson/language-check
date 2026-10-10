@@ -96,10 +96,17 @@ class SqliteHistoryStore(
 
     override suspend fun detail(id: String): SessionDetail? = read("read a session", null) { db -> db.detail(id) }
 
+    /**
+     * The query finds sessions whose latest attempt ran with [key]'s language and settings;
+     * the one returned is the newest whose last attempt succeeded and whose decided attempt
+     * ran with them itself ([SessionDetail.keptFor]): within a session they can change.
+     */
     override suspend fun reusable(key: ReuseKey, since: Long): SessionDetail? = read("look for a kept answer", null) { db ->
         db.select(HistorySchema.reusable(key), HistorySchema.reusableArgs(key, since), ::sessionRecord)
-            .firstOrNull { it.lastAttemptSucceeded() }
-            ?.let { SessionDetail(it, db.suggestions(it.id)) }
+            .asSequence()
+            .filter { it.lastAttemptSucceeded() }
+            .map { SessionDetail(it, db.suggestions(it.id)) }
+            .firstOrNull { it.keptFor(key) != null }
     }
 
     /** Removes the session and, by cascade, its suggestions. */
@@ -203,7 +210,8 @@ class SqliteHistoryStore(
         }
 
         /**
-         * Runs [HistorySchema.upgrade] and rewrites each session's attempts, in the one
+         * Runs [HistorySchema.upgrade] (which, from before version 4, deletes the tester's
+         * sessions) and rewrites each session's attempts, in the one
          * transaction the framework opens for it. A version with no way up (none exists
          * today, but a refusal here would turn history off for good, with only a log line)
          * is started afresh instead: the old rows are dropped, and that is logged.
@@ -220,7 +228,7 @@ class SqliteHistoryStore(
             val rewritten = buildList {
                 db.eachRow(HistorySchema.ALL_ATTEMPTS) { row ->
                     val stored = row.string("attempts")
-                    val upgraded = upgradeAttempts(stored)
+                    val upgraded = upgradeAttempts(stored, HistorySchema.ATTEMPT_CONTEXT.associateWith(row::stringOrNull))
                     if (upgraded != stored) add(listOf(upgraded, row.string("id")))
                 }
             }

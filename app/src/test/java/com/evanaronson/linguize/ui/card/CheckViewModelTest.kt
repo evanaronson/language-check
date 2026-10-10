@@ -51,6 +51,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.OutputStream
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The card's view model on a real checker and history, with a fake provider and store:
@@ -136,10 +137,10 @@ class CheckViewModelTest {
 
     @Test
     fun aFreshCheckStartsOver() {
-        check.check(QUESTION, null, Origin.Tester)
+        check.check(QUESTION, null, Origin.Menu)
         reviewed()
         check.acceptAll(EditKind.Fix)
-        check.check(QUESTION, null, Origin.Tester)
+        check.check(QUESTION, null, Origin.Menu)
         assertNull(check.workingText)
         assertEquals(0, reviewed().revision.acceptedCount)
         // The first card's change never went back to the app.
@@ -211,13 +212,79 @@ class CheckViewModelTest {
     @Test
     fun aFailureIsShownAndKeptByItsToken() {
         client.answer = { throw CheckFailure(CheckFailure.Reason.RateLimited, "slow down") }
-        check.check(QUESTION, null, Origin.Tester)
+        check.check(QUESTION, null, Origin.Button)
         waitFor("the failure") { check.state is CardState.Failed }
         assertEquals(CardState.Failed(CheckFailure.Reason.RateLimited, "slow down"), check.state)
         check.dismiss(applied = false)
         val session = closed().single()
         assertEquals("rate_limited", session.attempts.single().failure)
         assertEquals(Outcome.Failed, session.outcome)
+    }
+
+    @Test
+    fun theTryItCardIsNeverRecorded() {
+        store.kept = keptSession(emptyList())
+        check.check(QUESTION, Language.Catalan, Origin.Tester)
+        reviewed()
+        check.acceptAll(EditKind.Fix)
+        check.changeLanguage(Language.Spanish)
+        reviewed()
+        check.recheck()
+        reviewed()
+        check.dismiss(applied = true)
+        check.check(QUESTION, null, Origin.Tester)
+        reviewed()
+        viewModels.clear()
+        history.awaitWrites(5_000)
+        // Every check went to the model; nothing was looked up, saved or closed.
+        assertEquals(4, client.checks.size)
+        assertEquals(0, store.lookups.get())
+        assertEquals(0, store.saves.get())
+        assertTrue(store.closed.isEmpty())
+    }
+
+    @Test
+    fun anotherLanguageOnTheSameCardIsTheSameSessionWithTheLastLanguage() {
+        check.check(QUESTION, Language.Catalan, Origin.Button, hostApp = "org.telegram.messenger")
+        reviewed()
+        check.settle("tu", "informal")
+        reviewed()
+        check.acceptAll(EditKind.Fix)
+        assertEquals("Com estàs?", check.workingText)
+
+        check.changeLanguage(Language.Spanish)
+        // A review in another language: nothing accepted or answered is carried over.
+        assertNull(check.workingText)
+        assertEquals(0, reviewed().revision.acceptedCount)
+        assertEquals(emptyList<Settled>(), done().settled)
+        assertEquals(Language.Spanish, client.checks.last().third.language)
+        assertEquals(emptyList<Settled>(), client.checks.last().third.settled)
+
+        check.changeLanguage(null)
+        reviewed()
+        assertEquals(null, client.checks.last().third.language)
+        check.changeLanguage(Language.Catalan)
+        reviewed()
+        check.acceptAll(EditKind.Fix)
+        assertEquals(5, client.checks.size)
+        // Nothing is closed while the card is up.
+        assertTrue(closed().isEmpty())
+
+        check.dismiss(applied = true)
+        val session = closed().single()
+        assertEquals("ca", session.requestedLanguage)
+        assertEquals(listOf("ca", "ca", "es", null, "ca"), session.attempts.map { it.requestedLanguage })
+        assertEquals("Com estàs?", session.finalText)
+        assertEquals(Outcome.Applied, session.outcome)
+        assertEquals("org.telegram.messenger", session.hostApp)
+    }
+
+    @Test
+    fun anotherLanguageWithNoCardDoesNothing() {
+        check.changeLanguage(Language.Spanish)
+        settle()
+        assertTrue(client.checks.isEmpty())
+        assertNull(check.state)
     }
 
     @Test
@@ -234,11 +301,13 @@ class CheckViewModelTest {
         waitFor("a re-check") { client.checks.size == 2 }
         assertEquals(Punctuation.Strict, client.checks.last().third.punctuation)
         assertEquals(1, reviewed().revision.acceptedCount)
-        // The re-check ran with other settings, so the first session closed and a new one holds it.
-        val first = closed().single()
-        assertEquals("moderate", first.punctuation)
+        // The re-check ran with other settings, still in the card's one session.
+        assertTrue(closed().isEmpty())
         check.dismiss(applied = true)
-        assertEquals("strict", closed().last().punctuation)
+        val session = closed().single()
+        assertEquals("strict", session.punctuation)
+        assertEquals(listOf("moderate", "strict"), session.attempts.map { it.punctuation })
+        assertEquals(Outcome.Applied, session.outcome)
     }
 
     @Test
@@ -269,17 +338,24 @@ class CheckViewModelTest {
         return recording.close(700, null)
     }
 
-    /** Remembers the sessions it was asked to close; [kept] is what every reuse lookup finds. */
+    /** Remembers the sessions it was asked to close, and counts saves and lookups; [kept] is what every reuse lookup finds. */
     private class RecordingStore : HistoryStore {
         val closed: MutableList<SessionRecord> = Collections.synchronizedList(mutableListOf())
+        val saves = AtomicInteger()
+        val lookups = AtomicInteger()
 
         @Volatile var kept: SessionDetail? = null
 
-        override suspend fun save(session: SessionRecord) = Unit
+        override suspend fun save(session: SessionRecord) {
+            saves.incrementAndGet()
+        }
         override suspend fun close(session: SessionRecord, suggestions: List<SuggestionRecord>) {
             closed += session
         }
-        override suspend fun reusable(key: ReuseKey, since: Long): SessionDetail? = kept
+        override suspend fun reusable(key: ReuseKey, since: Long): SessionDetail? {
+            lookups.incrementAndGet()
+            return kept
+        }
         override suspend fun markAbandoned(now: Long) = Unit
         override fun count(): Flow<Int> = flowOf(0)
         override fun since(): Flow<Long?> = flowOf(null)

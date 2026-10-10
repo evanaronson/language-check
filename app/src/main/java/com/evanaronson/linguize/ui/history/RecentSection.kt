@@ -115,7 +115,7 @@ private fun SessionRow(row: RecentRow, now: Long, time: DateTimeFormatter, onCli
             .padding(vertical = 12.dp),
     ) {
         Text(
-            listOfNotNull(relativeDate(summary.startedAt, now, time), source(summary.origin, row.appLabel)).joinToString(" · "),
+            listOfNotNull(relativeDate(summary.startedAt, now, time), row.appLabel).joinToString(" · "),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

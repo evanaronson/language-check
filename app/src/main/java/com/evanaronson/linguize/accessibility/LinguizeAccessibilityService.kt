@@ -135,9 +135,10 @@ class LinguizeAccessibilityService : AccessibilityService() {
                     // At the top, clear of the keyboard that's open for the field.
                     FloatingCard(state, actions, onDismiss = close, alignment = Alignment.TopCenter, topPadding = 32.dp) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Another language checks again on the same card: one history session for it.
                             LanguagePicker(language, onSelect = {
                                 language = it
-                                check.check(selection.text, it, Origin.Button, field.packageName?.toString())
+                                check.changeLanguage(it)
                             })
                             FilledTonalIconButton(onClick = openSettings) {
                                 Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")

@@ -35,33 +35,36 @@ internal fun decodeAttempts(stored: String): List<Attempt> = try {
 
 /**
  * The `attempts` column of an older row in this version's shape: an attempt's answer moves
- * from `verdict` to `raw` (version 1), and its failure goes from the reason's constant name
- * to its token (versions 1 and 2, see [LEGACY_FAILURES]). Anything else, and a column that
- * can't be read, is left as it is.
+ * from `verdict` to `raw` (version 1), its failure goes from the reason's constant name to
+ * its token (versions 1 and 2, see [LEGACY_FAILURES]), and it gets the language and
+ * settings it ran with (versions 1 to 3, which ran every attempt of a session with the
+ * session's: [context] has them by field, from the row; a null one, such as auto-detect,
+ * reads as null anyway, so it isn't added). Anything else, a field an attempt has already,
+ * and a column that can't be read, are left as they are.
  */
-internal fun upgradeAttempts(stored: String): String {
+internal fun upgradeAttempts(stored: String, context: Map<String, String?> = emptyMap()): String {
     val attempts = try {
         historyJson.parseToJsonElement(stored) as? JsonArray ?: return stored
     } catch (_: SerializationException) {
         return stored
     }
-    val upgraded = attempts.map { attempt -> if (attempt is JsonObject) upgradeAttempt(attempt) else attempt }
+    val upgraded = attempts.map { attempt -> if (attempt is JsonObject) upgradeAttempt(attempt, context) else attempt }
     return if (upgraded == attempts) stored else JsonArray(upgraded).toString()
 }
 
-private fun upgradeAttempt(attempt: JsonObject): JsonObject {
+private fun upgradeAttempt(attempt: JsonObject, context: Map<String, String?>): JsonObject {
     val failure = (attempt["failure"] as? JsonPrimitive)?.takeIf { it.isString }?.content
     val token = LEGACY_FAILURES[failure]
-    if (token == null && ("verdict" !in attempt || "raw" in attempt)) return attempt
-    return JsonObject(
-        attempt.entries.associate { (key, value) ->
-            when {
-                key == "verdict" && "raw" !in attempt -> "raw" to value
-                key == "failure" && token != null -> "failure" to JsonPrimitive(token)
-                else -> key to value
-            }
-        },
-    )
+    val added = context.filter { (field, value) -> value != null && field !in attempt }.mapValues { JsonPrimitive(it.value) }
+    if (token == null && added.isEmpty() && ("verdict" !in attempt || "raw" in attempt)) return attempt
+    val renamed = attempt.entries.associate { (key, value) ->
+        when {
+            key == "verdict" && "raw" !in attempt -> "raw" to value
+            key == "failure" && token != null -> "failure" to JsonPrimitive(token)
+            else -> key to value
+        }
+    }
+    return JsonObject(renamed + added)
 }
 
 /**

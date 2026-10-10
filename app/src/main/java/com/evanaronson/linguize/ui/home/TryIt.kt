@@ -39,7 +39,8 @@ internal fun TryIt(check: CheckViewModel, onOpenSettings: () -> Unit) {
     )
     // Saved as the language's code (null for auto-detect).
     var code by rememberSaveable { mutableStateOf<String?>(null) }
-    // Picking a language from the menu runs the check, as in the accessibility overlay.
+    // Picking a language from the menu runs the check. Checks made here are never recorded
+    // in history (Origin.Tester isn't recorded): only text from other apps is.
     LanguagePicker(Language.forCode(code), onSelect = {
         code = it?.code
         sample.trim().takeIf { text -> text.isNotEmpty() }?.let { text -> check.check(text, it, Origin.Tester) }

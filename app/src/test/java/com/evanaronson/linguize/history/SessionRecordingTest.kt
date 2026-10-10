@@ -543,4 +543,101 @@ class SessionRecordingTest {
         assertEquals(first.session, recording.session)
         assertEquals(300L, recording.session.closedAt)
     }
+
+    @Test
+    fun eachAttemptKeepsTheLanguageItAskedForAndTheSessionTheLastOne() {
+        val recording = recording(rain)
+        val settings = context.opening.settings
+        recording.succeeded(200, rainRevision())
+        recording.changeLanguage("es", settings, 250)
+        // The session takes the language with the attempt.
+        assertEquals("ca", recording.session.requestedLanguage)
+        assertEquals("es", recording.succeeded(300, rainRevision()).requestedLanguage)
+        recording.changeLanguage(null, settings.copy(model = "b-model"), 350)
+        recording.failed(400)
+
+        val detail = recording.close(500, null)
+        assertEquals(listOf("ca", "es", null), detail.session.attempts.map { it.requestedLanguage })
+        assertEquals(listOf("a-model", "a-model", "b-model"), detail.session.attempts.map { it.model })
+        assertNull(detail.session.requestedLanguage)
+        assertEquals("b-model", detail.session.model)
+        assertEquals(listOf("ca", "es", null), detail.session.attempts.indices.map { detail.session.reuseKeyOf(it)!!.requestedLanguage })
+        assertEquals(detail.session.reuseKey, detail.session.reuseKeyOf(2))
+        assertEquals(Outcome.Failed, detail.session.outcome)
+    }
+
+    @Test
+    fun anotherLanguageSupersedesTheRevisionOnOfferWhateverComesNext() {
+        val recording = recording(rain)
+        val revision = rainRevision()
+        recording.succeeded(200, revision)
+        val fixed = revision.acceptAll(EditKind.Fix)
+        recording.changed(fixed)
+        recording.copied(EditKind.Fix)
+        recording.changeLanguage("es", context.opening.settings, 300)
+        // The new language's check failed: the card shows the failure, not the old suggestions.
+        recording.failed(400)
+        // A late report about the old card decides nothing.
+        recording.changed(fixed.undo())
+
+        val detail = recording.close(500, null)
+        assertTrue(detail.suggestions.isNotEmpty())
+        assertTrue(detail.suggestions.all { it.attempt == 0 && it.decision == Decision.Superseded && it.decidedAt == 300L })
+        // The copy still happened on this card.
+        assertEquals(Outcome.Copied, detail.session.outcome)
+    }
+
+    @Test
+    fun theNewLanguagesRevisionIsDecidedAtTheClose() {
+        val recording = recording(rain)
+        recording.succeeded(200, rainRevision())
+        recording.changeLanguage("es", context.opening.settings, 300)
+        val revision = rainRevision()
+        recording.succeeded(400, revision)
+        val fixed = revision.acceptAll(EditKind.Fix)
+        recording.changed(fixed)
+
+        val detail = recording.close(500, fixed.workingText)
+        val (old, new) = detail.suggestions.partition { it.attempt == 0 }
+        assertTrue(old.isNotEmpty() && old.all { it.decision == Decision.Superseded && it.decidedAt == 300L })
+        assertEquals(Decision.Accepted, new.single { it.kind == EditKind.Fix }.decision)
+        assertTrue(new.all { it.attempt == 1 })
+        assertEquals(1, detail.decidedAttempt())
+        assertEquals("es", detail.session.requestedLanguage)
+    }
+
+    @Test
+    fun otherSettingsAreRecordedWithTheNextAttemptWithoutStartingOver() {
+        val recording = recording(rain)
+        val revision = rainRevision()
+        recording.succeeded(200, revision)
+        val fixed = revision.acceptAll(EditKind.Fix)
+        recording.changed(fixed)
+        recording.runWith("ca", context.opening.settings.copy(punctuation = "strict"))
+        // A re-check with new settings carries the accepted fix over, as any re-check.
+        recording.succeeded(300, rainRevision().acceptMatching(fixed.acceptedEdits))
+        val detail = recording.close(400, fixed.workingText)
+        assertEquals(listOf("Relaxed", "strict"), detail.session.attempts.map { it.punctuation })
+        assertEquals("strict", detail.session.punctuation)
+        assertTrue(detail.suggestions.filter { it.attempt == 0 }.all { it.decision == Decision.Superseded })
+        assertEquals(Decision.Accepted, detail.suggestions.single { it.attempt == 1 && it.kind == EditKind.Fix }.decision)
+    }
+
+    @Test
+    fun aClosedSessionDoesntChange() {
+        val recording = recording(rain)
+        recording.close(200, null)
+        recording.changeLanguage("es", context.opening.settings, 300)
+        recording.runWith("es", context.opening.settings.copy(model = "b-model"))
+        assertEquals("ca", recording.session.requestedLanguage)
+        assertEquals("a-model", recording.session.model)
+    }
+
+    @Test
+    fun rowsFromBeforeSchema4RanEveryAttemptWithTheSessionsSettings() {
+        val old = recording(rain).session.copy(schema = 3, attempts = listOf(Attempt(at = 1), Attempt(at = 2)))
+        assertEquals(listOf(old.reuseKey, old.reuseKey), old.attempts.indices.map(old::reuseKeyOf))
+        // From schema 4 on, an attempt without its settings matches nothing.
+        assertNull(old.copy(schema = 4).reuseKeyOf(0))
+    }
 }

@@ -1,7 +1,6 @@
 package com.evanaronson.linguize.ui.history
 
 import com.evanaronson.linguize.core.Verdict
-import com.evanaronson.linguize.history.Origin
 import com.evanaronson.linguize.history.Outcome
 import com.evanaronson.linguize.history.SessionSummary
 import com.evanaronson.linguize.ui.components.shortDate
@@ -19,9 +18,6 @@ internal fun relativeDate(at: Long, now: Long, time: DateTimeFormatter, zone: Zo
         else -> shortDate(at, now, zone)
     }
 }
-
-/** Where the text came from: the app's name, "Try it" for the tester, or null when unknown. */
-internal fun source(origin: Origin?, appLabel: String?): String? = if (origin == Origin.Tester) "Try it" else appLabel
 
 /** The first line with something on it, for a one-glance preview. */
 internal fun firstLine(text: String): String = text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }.orEmpty()

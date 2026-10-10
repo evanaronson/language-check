@@ -21,6 +21,7 @@ import com.evanaronson.linguize.core.Revision
 import com.evanaronson.linguize.core.Settled
 import com.evanaronson.linguize.history.Answer
 import com.evanaronson.linguize.history.CheckHistory
+import com.evanaronson.linguize.history.Kept
 import com.evanaronson.linguize.history.Opening
 import com.evanaronson.linguize.history.Origin
 import com.evanaronson.linguize.llm.CheckFailure
@@ -44,11 +45,13 @@ sealed interface CardState {
  * survive checking again (after an answer to an assumption, a retry, or new
  * settings) wherever the new suggestions are the same.
  *
- * History is [CheckHistory]'s job; this only tells it what happens. A session is opened
- * with each fresh [check] (and by a [recheck] whose settings differ from the session's),
- * gets an attempt per answer, and is closed by [dismiss], the next [check] or the view
- * model going away. [onCleared] closes it as not applied: a host that hands the text back
- * calls `dismiss(applied = true)` itself before finishing.
+ * History is [CheckHistory]'s job; this only tells it what happens, and it decides what's
+ * recorded (nothing for the app's own "Try it" card, see [Origin.recorded]). A session is
+ * opened with each fresh [check], gets an attempt per answer, whatever changed in between
+ * (other settings for a [recheck], another language with [changeLanguage]: a card is one
+ * session), and is closed by [dismiss], the next [check] or the view model going away.
+ * [onCleared] closes it as not applied: a host that hands the text back calls
+ * `dismiss(applied = true)` itself before finishing.
  *
  * [checker] is called on first use, off the main thread (making it can read assets).
  * Hosts get one from [factory].
@@ -93,11 +96,25 @@ class CheckViewModel(
         this.origin = origin
         this.hostApp = hostApp
         settled = emptyList()
-        run(fresh = true)
+        run(Run.Fresh)
+    }
+
+    /**
+     * The writer picked another [language] (null to detect it) on the open card: checks the
+     * same text again in it. A different language is a different review, so nothing
+     * accepted is carried over and the answers to assumptions start afresh, as with a new
+     * [check]; but it's the same card, so history keeps one session for it, which ends with
+     * the last language picked. Does nothing when no card is open.
+     */
+    fun changeLanguage(language: Language?) {
+        if (state == null) return
+        this.language = language
+        settled = emptyList()
+        run(Run.NewLanguage)
     }
 
     /** Checks the same text again (a retry, or after settings changed), keeping answers and accepted changes. */
-    fun recheck() = run(fresh = false)
+    fun recheck() = run(Run.Again)
 
     /**
      * Back from settings with the card still up: checks again, as [recheck] does, when the
@@ -119,14 +136,26 @@ class CheckViewModel(
     /** Overrides an assumption with the writer's [answer] and checks again. */
     fun settle(about: String, answer: String) {
         settled = settled.filterNot { it.about == about } + Settled(about, answer)
-        run(fresh = false)
+        run(Run.Again)
     }
 
-    private fun run(fresh: Boolean) {
-        if (fresh) {
-            carried = emptyList()
-        } else {
+    /** What a [run] is: how it starts in history and what it keeps of the card. */
+    private enum class Run {
+        /** A new card: a new session, nothing kept. */
+        Fresh,
+
+        /** The same card in another language: the same session, nothing kept. */
+        NewLanguage,
+
+        /** The same card checked again (maybe with new settings): the same session, accepted changes kept. */
+        Again,
+    }
+
+    private fun run(kind: Run) {
+        if (kind == Run.Again) {
             reviewed?.let { carried = it.revision.acceptedEdits }
+        } else {
+            carried = emptyList()
         }
         val text = text
         val language = language
@@ -144,12 +173,15 @@ class CheckViewModel(
                 ranWith = context
                 val ask: suspend () -> Checked = { checker.check(text, language, answers, context) }
                 val opening = Opening(origin, hostApp, language?.code, context.stored)
-                val answer = if (fresh) {
-                    history.firstAttempt(text, opening, ask) { kept -> checker.reuse(text, language, kept.raw, context) }
-                } else {
-                    // If settings changed while the card was up, the answer goes in a new session.
-                    history.recheck(text, opening)
-                    Answer(ask(), null)
+                val reuse: suspend (Kept) -> Checked = { kept -> checker.reuse(text, language, kept.raw, context) }
+                val answer = when (kind) {
+                    Run.Fresh -> history.firstAttempt(text, opening, ask, reuse)
+                    Run.NewLanguage -> history.languageChanged(text, opening, ask, reuse)
+                    Run.Again -> {
+                        // Settings may have changed while the card was up: the attempt records the new ones.
+                        history.recheck(opening)
+                        Answer(ask(), null)
+                    }
                 }
                 answer.reused?.let {
                     answers = it.settled

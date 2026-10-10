@@ -26,7 +26,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.evanaronson.linguize.App
 import com.evanaronson.linguize.core.CheckResult
-import com.evanaronson.linguize.history.Origin
 import com.evanaronson.linguize.history.Outcome
 import com.evanaronson.linguize.history.SessionRecord
 import com.evanaronson.linguize.ui.card.CardActions
@@ -99,7 +98,7 @@ private fun Header(session: SessionRecord, appLabel: String?) {
     val started = Instant.ofEpochMilli(session.startedAt).atZone(ZoneId.systemDefault())
     Column {
         Text("${shortDate(session.startedAt)}, ${time.format(started)}", style = MaterialTheme.typography.titleLarge)
-        source(session.origin, appLabel)?.let { Faint(it) }
+        appLabel?.let { Faint(it) }
     }
 }
 
@@ -124,7 +123,7 @@ private fun ReadOnlyCard(card: CardState.Done) {
 private fun WhatCameOfIt(session: SessionRecord) {
     val finalText = session.finalText
     if (finalText != null) {
-        TextBlock(if (session.origin == Origin.Tester) "Applied" else "Sent", finalText)
+        TextBlock("Sent", finalText)
         return
     }
     when (session.outcome) {

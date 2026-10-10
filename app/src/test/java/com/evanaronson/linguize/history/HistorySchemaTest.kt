@@ -298,6 +298,44 @@ class HistorySchemaTest {
     }
 
     @Test
+    fun everyVersionUpgradesByDeletingTheTestersSessions() {
+        assertEquals(4, HistorySchema.VERSION)
+        for (from in 1..3) {
+            val statements = HistorySchema.upgrade(from, HistorySchema.SESSION_COLUMNS.toSet())!!
+            val deletes = statements.filter { it.startsWith("DELETE") }
+            assertEquals(from.toString(), HistorySchema.DELETE_UNRECORDED, deletes)
+            // After version 1's names have become tokens, and suggestions before their sessions.
+            assertTrue(statements.indexOf(deletes.first()) > statements.indexOfFirst { it.contains("SET \"origin\"") })
+            assertTrue(deletes[0].startsWith("DELETE FROM suggestions") && deletes[0].contains("'tester'"))
+            assertTrue(deletes[1].startsWith("DELETE FROM sessions") && deletes[1].endsWith("\"origin\" IN ('tester')"))
+        }
+    }
+
+    @Test
+    fun anUpgradedAttemptGetsTheSessionsLanguageAndSettings() {
+        val v3 = """[{"at":1,"raw":"{}","failure":null},{"at":2,"raw":null,"failure":"offline"}]"""
+        val row = mapOf(
+            "requestedLanguage" to "ca", "nativeLanguage" to "English", "punctuation" to "moderate", "judgments" to "both",
+            "provider" to "gemini", "model" to "m", "promptHash" to "p1",
+        )
+        assertEquals(HistorySchema.ATTEMPT_CONTEXT, row.keys.toList())
+        val v4 = upgradeAttempts(v3, row)
+        val attempts = decodeAttempts(v4)
+        assertEquals(listOf("ca", "ca"), attempts.map { it.requestedLanguage })
+        assertEquals(listOf("m", "m"), attempts.map { it.model })
+        assertEquals(listOf("{}", null), attempts.map { it.raw })
+        val upgraded = session.copy(textHash = "h", requestedLanguage = "ca", nativeLanguage = "English", punctuation = "moderate",
+            judgments = "both", provider = "gemini", model = "m", promptHash = "p1", attempts = attempts)
+        assertEquals(upgraded.reuseKey, upgraded.reuseKeyOf(0))
+        assertEquals(v4, upgradeAttempts(v4, row))
+        // Auto-detect reads as null with nothing added; a field an attempt has is kept.
+        assertFalse(upgradeAttempts(v3, row + ("requestedLanguage" to null)).contains("requestedLanguage"))
+        val kept = """[{"at":1,"requestedLanguage":null}]"""
+        assertEquals(null, decodeAttempts(upgradeAttempts(kept, row)).single().requestedLanguage)
+        assertEquals(v3, upgradeAttempts(v3))
+    }
+
+    @Test
     fun aVersionWithNoWayUpHasNone() {
         assertNull(HistorySchema.upgrade(0, emptySet()))
         assertNull(HistorySchema.upgrade(HistorySchema.VERSION, emptySet()))

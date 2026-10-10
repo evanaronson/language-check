@@ -295,6 +295,72 @@ class SqliteHistoryStoreTest {
     }
 
     @Test
+    fun aVersion3DatabaseLosesTheTestersSessionsAndKeepsEachAttemptsLanguage() = runBlocking<Unit> {
+        // Version 3 had this version's tables, and recorded the "Try it" card as origin 'tester'.
+        SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(NAME), null).use { db ->
+            HistorySchema.CREATE.forEach(db::execSQL)
+            val attempts = """[{"at":1500,"settled":[],"raw":"{\"status\":\"ok\"}","failure":null,"failureDetail":null,"reusedFrom":null}]"""
+            for ((id, origin, language) in listOf(Triple("menu", "menu", "'ca'"), Triple("tester", "tester", "'es'"), Triple("auto", "button", "NULL"))) {
+                db.execSQL(
+                    """INSERT INTO sessions ("id","deviceId","schema","createdAt","updatedAt","startedAt","closedAt","origin",
+                    "requestedLanguage","nativeLanguage","text","textHash","outcome","punctuation","judgments","provider","model",
+                    "promptHash","appVersion","attempts")
+                    VALUES ('$id','device',3,1000,2000,1000,2000,'$origin',$language,'English','Com estas?','h','none','moderate',
+                    'both','gemini','m','p1','0.3',?)""",
+                    arrayOf(attempts),
+                )
+                db.execSQL(
+                    """INSERT INTO suggestions VALUES ('g-$id','$id','device',3,2000,2000,NULL,0,'fix',4,9,'estas','estàs',NULL,'ignored',2000)""",
+                )
+            }
+            db.version = 3
+        }
+        assertNull(store.detail("tester"))
+        val menu = store.detail("menu")!!
+        assertEquals(SessionRecord.SCHEMA, menu.session.schema)
+        assertEquals("ca", menu.session.attempts.single().requestedLanguage)
+        assertEquals("gemini", menu.session.attempts.single().provider)
+        assertEquals(menu.session.reuseKey, menu.session.reuseKeyOf(0))
+        assertEquals(1, menu.suggestions.size)
+        assertNull(store.detail("auto")!!.session.attempts.single().requestedLanguage)
+        assertEquals(2, store.count().first())
+        // The tester's suggestions went with it.
+        raw { db ->
+            db.rawQuery("SELECT COUNT(*) FROM suggestions WHERE \"sessionId\" = 'tester'", null).use {
+                it.moveToFirst()
+                assertEquals(0, it.getInt(0))
+            }
+            db.rawQuery("SELECT COUNT(*) FROM suggestions", null).use {
+                it.moveToFirst()
+                assertEquals(2, it.getInt(0))
+            }
+        }
+    }
+
+    @Test
+    fun aVersion1DatabaseLosesTheTestersSessionsToo() = runBlocking<Unit> {
+        legacyDatabase(withStatus = true)
+        raw { db ->
+            db.execSQL(
+                """INSERT INTO sessions ("id","deviceId","schema","createdAt","updatedAt","startedAt","closedAt","origin","text",
+                "textHash","outcome","punctuation","judgments","provider","model","promptHash","appVersion","attempts")
+                VALUES ('tried','device',1,4000,4000,4000,4000,'Tester','x','h3','None','Strict','Both','OpenAI','m','p1','0.1','[]')""",
+            )
+            db.execSQL(
+                """INSERT INTO suggestions VALUES ('gt','tried','device',1,4000,4000,NULL,0,'fix',0,1,'x','y',NULL,'Ignored',4000)""",
+            )
+        }
+        assertNull(store.detail("tried"))
+        assertEquals("ca", store.detail("old")!!.session.attempts.single().requestedLanguage)
+        raw { db ->
+            db.rawQuery("SELECT COUNT(*) FROM suggestions WHERE \"sessionId\" = 'tried'", null).use {
+                it.moveToFirst()
+                assertEquals(0, it.getInt(0))
+            }
+        }
+    }
+
+    @Test
     fun aVersionWithNoUpgradeStartsAfresh() = runBlocking<Unit> {
         // A version no migration knows: history starts over rather than staying off for good.
         SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(NAME), null).use { db ->

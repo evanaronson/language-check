@@ -273,30 +273,33 @@ class CheckHistoryTest {
     }
 
     @Test
-    fun aRecheckWithOtherSettingsClosesTheSessionAndOpensAnother() = runBlocking<Unit> {
+    fun aRecheckWithOtherSettingsStaysInTheSessionAndRecordsThem() = runBlocking<Unit> {
         val first = history.open(rain, opening)!!
         history.succeeded(emptyList(), "{}", result)
-        // Same settings: the same session.
-        history.recheck(rain, opening)
+        history.recheck(opening)
         assertEquals(first.id, history.session?.id)
 
         now = 1_500
-        history.recheck(rain, opening.copy(settings = settings.copy(model = "another-model")))
-        val second = history.session!!
-        assertTrue(second.id != first.id)
-        assertEquals("another-model", second.model)
-        assertEquals(1_500, second.startedAt)
+        history.recheck(opening.copy(settings = settings.copy(model = "another-model", punctuation = "strict")))
+        // Nothing changes until the attempt runs with them.
+        assertEquals(first.id, history.session!!.id)
+        assertEquals("a-model", history.session!!.model)
         history.succeeded(emptyList(), "{}", result)
+        assertEquals("another-model", history.session!!.model)
+        assertEquals("strict", history.session!!.punctuation)
         history.close(null)
         history.flush()
 
-        assertEquals(listOf("save", "save", "close", "save", "save", "close"), store.calls.map { it.first })
-        val closedFirst = store.calls[2].second
-        assertEquals(first.id, closedFirst.id)
-        assertEquals("a-model", closedFirst.model)
-        assertEquals(1, closedFirst.attempts.size)
-        assertEquals("another-model", store.calls.last().second.model)
-        assertEquals(1, store.calls.last().second.attempts.size)
+        assertEquals(listOf("save", "save", "save", "close"), store.calls.map { it.first })
+        val closed = store.calls.last().second
+        assertEquals(first.id, closed.id)
+        assertEquals(1_000, closed.startedAt)
+        assertEquals("another-model", closed.model)
+        assertEquals(listOf("a-model", "another-model"), closed.attempts.map { it.model })
+        assertEquals(listOf("moderate", "strict"), closed.attempts.map { it.punctuation })
+        assertEquals(listOf("ca", "ca"), closed.attempts.map { it.requestedLanguage })
+        assertEquals(opening.settings, closed.reuseKeyOf(0)!!.settings)
+        assertEquals(closed.reuseKey, closed.reuseKeyOf(1))
     }
 
     @Test
@@ -304,7 +307,7 @@ class CheckHistoryTest {
         environment.enabled = false
         history.open(rain, opening)
         environment.enabled = true
-        history.recheck(rain, opening.copy(settings = settings.copy(model = "another-model")))
+        history.recheck(opening.copy(settings = settings.copy(model = "another-model")))
         history.flush()
         assertNull(history.session)
         assertTrue(store.calls.isEmpty())
@@ -339,17 +342,167 @@ class CheckHistoryTest {
     }
 
     @Test
+    fun theTryItCardIsntRecorded() = runBlocking<Unit> {
+        store.kept = keptSession("earlier", "{}")
+        val tester = opening.copy(origin = Origin.Tester, hostApp = null)
+        assertNull(history.open(rain, tester))
+        val answer = history.firstAttempt(rain, tester, ask = { delay(100); "model" }, reuse = { "kept" })
+        assertEquals(Answer("model", null), answer)
+        history.succeeded(emptyList(), "{}", result)
+        history.changed(result.revision.acceptAll(EditKind.Fix))
+        history.copied(EditKind.Fix)
+        assertEquals(Answer("model", null), history.languageChanged(rain, tester.copy(requestedLanguage = "es"), ask = { delay(100); "model" }, reuse = { "kept" }))
+        history.recheck(tester.copy(settings = settings.copy(model = "another-model")))
+        history.failed(emptyList(), "offline", null)
+        history.close(rain)
+        history.flush()
+        assertNull(history.session)
+        assertTrue(store.lookedUp.isEmpty())
+        assertTrue(store.calls.isEmpty())
+    }
+
+    @Test
+    fun onlyChecksFromOtherAppsAreRecorded() {
+        assertEquals(setOf(Origin.Menu, Origin.Button), Origin.entries.filter { it.recorded }.toSet())
+    }
+
+    @Test
+    fun anotherLanguageIsTheSameSessionAskingForTheLastOne() = runBlocking<Unit> {
+        // The model answers after the lookups have run, so each is recorded.
+        val first = history.firstAttempt(rain, opening, ask = { slowly() }, reuse = { "kept" })
+        assertEquals("model", first.value)
+        val id = history.session!!.id
+        now = 1_100
+        history.succeeded(emptyList(), "{}", result)
+
+        now = 1_200
+        val spanish = opening.copy(requestedLanguage = "es")
+        assertEquals(Answer("model", null), history.languageChanged(rain, spanish, ask = { slowly() }, reuse = { "kept" }))
+        assertEquals(id, history.session!!.id)
+        now = 1_300
+        history.succeeded(emptyList(), "{}", result)
+        assertEquals("es", history.session!!.requestedLanguage)
+
+        now = 1_400
+        val auto = opening.copy(requestedLanguage = null)
+        history.languageChanged(rain, auto, ask = { slowly() }, reuse = { "kept" })
+        now = 1_500
+        history.succeeded(emptyList(), "{}", result)
+        // A re-check in the language picked last is the same session too.
+        history.recheck(auto)
+        assertEquals(id, history.session!!.id)
+        history.close(null)
+        history.flush()
+
+        // Saved when opened and after each attempt.
+        assertEquals(listOf("save", "save", "save", "save", "close"), store.calls.map { it.first })
+        val (_, closed, suggestions) = store.calls.last()
+        assertEquals(id, closed.id)
+        assertNull(closed.requestedLanguage)
+        assertEquals(listOf("ca", "es", null), closed.attempts.map { it.requestedLanguage })
+        assertEquals(Outcome.None, closed.outcome)
+        // The first two languages' suggestions were replaced when the language changed.
+        assertTrue(suggestions.filter { it.attempt < 2 }.all { it.decision == Decision.Superseded })
+        assertEquals(setOf(1_200L, 1_400L), suggestions.filter { it.attempt < 2 }.map { it.decidedAt }.toSet())
+        assertTrue(suggestions.filter { it.attempt == 2 }.all { it.decision == Decision.Ignored })
+        // Each language was looked up in its own.
+        assertEquals(listOf("ca", "es", null), store.lookedUp.map { it.first.requestedLanguage })
+        assertEquals(1_400 - CheckHistory.REUSE_WITHIN_MS, store.lookedUp.last().second)
+    }
+
+    @Test
+    fun aKeptVerdictInTheNewLanguageIsShown() = runBlocking<Unit> {
+        history.firstAttempt(rain, opening, ask = { "model" }, reuse = { "kept" })
+        history.succeeded(emptyList(), "{}", result)
+        store.kept = keptSession("earlier", "{\"status\":\"ok\"}", language = "es")
+        val answer = history.languageChanged(rain, opening.copy(requestedLanguage = "es"), ask = { delay(10_000); "model" }, reuse = { it.raw })
+        assertEquals("{\"status\":\"ok\"}", answer.value)
+        assertEquals("earlier", answer.reused?.sessionId)
+        history.succeeded(answer.reused!!.settled, answer.reused!!.raw, result, reusedFrom = "earlier")
+        history.close(null)
+        history.flush()
+        assertEquals(listOf(null, "earlier"), store.calls.last().second.attempts.map { it.reusedFrom })
+    }
+
+    @Test
+    fun aKeptVerdictMadeInAnotherLanguageIsntShown() = runBlocking<Unit> {
+        // Its card ended in Spanish, but the only answer it has was made in Catalan.
+        val kept = SessionRecording(rain, keptContext, 500, newId = { "earlier" })
+        kept.attempt(600, emptyList(), "{\"catalan\":1}", null, null, result.revision, null)
+        kept.changeLanguage("es", settings, 650)
+        kept.attempt(660, emptyList(), null, "offline", null, null, null)
+        store.kept = kept.close(700, null)
+        val answer = history.firstAttempt(rain, opening.copy(requestedLanguage = "es"), ask = { delay(200); "model" }, reuse = { it.raw })
+        assertEquals(Answer("model", null), answer)
+    }
+
+    @Test
+    fun anotherLanguageWithOtherSettingsIsStillTheSameSession() = runBlocking<Unit> {
+        val first = history.open(rain, opening)!!
+        history.succeeded(emptyList(), "{}", result)
+        val changed = opening.copy(requestedLanguage = "es", settings = settings.copy(model = "another-model"))
+        history.languageChanged(rain, changed, ask = { slowly() }, reuse = { null })
+        history.succeeded(emptyList(), "{}", result)
+        assertEquals(first.id, history.session!!.id)
+        assertEquals("es", history.session!!.requestedLanguage)
+        assertEquals("another-model", history.session!!.model)
+        // The lookup asked for the new language and settings.
+        assertEquals(changed.settings, store.lookedUp.last().first.settings)
+        assertEquals("es", store.lookedUp.last().first.requestedLanguage)
+        history.close(null)
+        history.flush()
+        assertEquals(listOf("save", "save", "save", "close"), store.calls.map { it.first })
+    }
+
+    @Test
+    fun aKeptVerdictFromAnAttemptWithOtherSettingsIsntShown() = runBlocking<Unit> {
+        // The card ended on its first answer (the re-check found the text unclear), made with
+        // a-model, though the session's latest attempt ran with another model.
+        val kept = SessionRecording(rain, keptContext, 500, newId = { "earlier" })
+        kept.attempt(600, emptyList(), "{\"first\":1}", null, null, result.revision, null)
+        kept.runWith("ca", settings.copy(model = "another-model"))
+        kept.attempt(650, emptyList(), "{\"second\":1}", null, null, null, null, Verdict.Status.Unclear)
+        store.kept = kept.close(700, null)
+        assertEquals("another-model", store.kept!!.session.model)
+        assertEquals(0, store.kept!!.decidedAttempt())
+
+        val other = opening.copy(settings = settings.copy(model = "another-model"))
+        assertEquals(Answer("model", null), history.firstAttempt(rain, other, ask = { slowly() }, reuse = { it.raw }))
+        history.close(null)
+        // With the settings the answer was made with, it's shown.
+        val same = history.firstAttempt(rain, opening, ask = { delay(10_000); "model" }, reuse = { it.raw })
+        assertEquals("{\"first\":1}", same.value)
+    }
+
+    @Test
+    fun anotherLanguageWithNoSessionOpenOpensOne() = runBlocking<Unit> {
+        // The first check was cancelled before it opened its session.
+        history.languageChanged(rain, opening.copy(requestedLanguage = "es"), ask = { "model" }, reuse = { null })
+        assertEquals("es", history.session?.requestedLanguage)
+        history.flush()
+        assertEquals(listOf("save"), store.calls.map { it.first })
+    }
+
+    @Test
     fun theStatusFollowsTheResult() {
         assertEquals(Verdict.Status.Ok, CheckHistory.statusOf(result))
         assertEquals(Verdict.Status.Unclear, CheckHistory.statusOf(CheckResult.Unclear))
         assertEquals(Verdict.Status.WrongLanguage, CheckHistory.statusOf(CheckResult.WrongLanguage("Catalan", "Spanish")))
     }
 
+    private suspend fun slowly(): String {
+        delay(100)
+        return "model"
+    }
+
     private val keptContext = SessionContext(opening.copy(hostApp = null), "1.0", "device")
 
-    private fun keptSession(id: String, raw: String) = SessionRecording(rain, keptContext, 500, newId = { id }).also {
-        it.attempt(600, listOf(Settled("tu", "informal")), raw, null, null, null, null)
-    }.close(700, null)
+    private fun keptSession(id: String, raw: String, language: String? = "ca"): SessionDetail {
+        val context = SessionContext(keptContext.opening.copy(requestedLanguage = language), "1.0", "device")
+        val recording = SessionRecording(rain, context, 500, newId = { id })
+        recording.attempt(600, listOf(Settled("tu", "informal")), raw, null, null, null, null)
+        return recording.close(700, null)
+    }
 
     private class FakeStore : HistoryStore {
         val calls: MutableList<Triple<String, SessionRecord, List<SuggestionRecord>>> = java.util.Collections.synchronizedList(mutableListOf())

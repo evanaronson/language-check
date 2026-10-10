@@ -18,12 +18,23 @@ import kotlinx.serialization.Serializable
  * written from the rows themselves, so a token this build doesn't know travels unchanged.
  */
 
-/** Where a check was started. */
+/**
+ * Where a check was started. [recorded] says whether it goes into history: only checks of
+ * text from other apps do.
+ */
 @Serializable(with = OriginSerializer::class)
-enum class Origin(val token: String) {
-    Menu("menu"),
-    Button("button"),
-    Tester("tester"),
+enum class Origin(val token: String, val recorded: Boolean) {
+    /** The selection menu of another app. */
+    Menu("menu", recorded = true),
+
+    /** The accessibility button, on another app's field. */
+    Button("button", recorded = true),
+
+    /**
+     * The "Try it" card in the app itself: never recorded. Builds before database version 4
+     * recorded it; the upgrade to 4 deletes those sessions.
+     */
+    Tester("tester", recorded = false),
     ;
 
     companion object {
@@ -49,7 +60,7 @@ enum class Decision(val token: String) {
     /** Still on offer when the card closed. */
     Ignored("ignored"),
 
-    /** From an earlier attempt that a re-check replaced. */
+    /** From an earlier attempt that a re-check, or a check in another language, replaced. */
     Superseded("superseded"),
     ;
 
@@ -96,11 +107,12 @@ data class SessionRecord(
     val closedAt: Long? = null,
     /** Null only when read from a row whose origin this build doesn't know. */
     val origin: Origin?,
-    /** Package name of the app the text came from; null when unknown or for the tester. */
+    /** Package name of the app the text came from; null when unknown. */
     val hostApp: String? = null,
     /**
      * The language the writer asked for, as its ISO 639-1 code (`Language.code`); null for
-     * auto-detect.
+     * auto-detect. Like the settings below, the latest attempt's: the language and settings
+     * can change while the card is up, and each attempt keeps its own ([reuseKeyOf]).
      */
     val requestedLanguage: String? = null,
     /**
@@ -116,7 +128,7 @@ data class SessionRecord(
     val finalText: String? = null,
     /** Null while open. */
     val outcome: Outcome? = null,
-    /** The settings in force, as tokens: they change what gets suggested. See [settings]. */
+    /** The settings the latest attempt ran with, as tokens: they change what gets suggested. See [settings]. */
     val punctuation: String,
     val judgments: String,
     val provider: String,
@@ -124,7 +136,7 @@ data class SessionRecord(
     /** Hash of the system prompt and schema, so verdicts from different prompts aren't compared as equal. */
     val promptHash: String,
     val appVersion: String,
-    /** Every request made for this text with these settings, oldest first. */
+    /** Every request made on this card, oldest first, each with the language and settings it ran with. */
     val attempts: List<Attempt> = emptyList(),
     /** What the text means, from the last successful attempt. */
     val meaning: String? = null,
@@ -134,24 +146,46 @@ data class SessionRecord(
      */
     val status: Verdict.Status? = null,
 ) {
-    /** The settings this session's attempts ran with. */
+    /** The settings this session's latest attempt ran with. */
     val settings: SessionSettings
         get() = SessionSettings(nativeLanguage, punctuation, judgments, provider, model, promptHash)
 
-    /** What another check must match to show this one's verdict again. */
+    /** The latest attempt's text, language and settings. */
     val reuseKey: ReuseKey
         get() = ReuseKey(textHash, requestedLanguage, settings)
+
+    /**
+     * What another check must match to show [attempt]'s (an index into [attempts]) verdict
+     * again: the text, and the language and settings that attempt ran with. Rows from before
+     * schema 4 didn't keep them per attempt, and every attempt of theirs ran with the
+     * session's. Null when there's no such attempt, or it lacks the settings.
+     */
+    fun reuseKeyOf(attempt: Int): ReuseKey? {
+        if (schema < 4) return reuseKey
+        val ran = attempts.getOrNull(attempt) ?: return null
+        val settings = SessionSettings(
+            nativeLanguage = ran.nativeLanguage,
+            punctuation = ran.punctuation ?: return null,
+            judgments = ran.judgments ?: return null,
+            provider = ran.provider ?: return null,
+            model = ran.model ?: return null,
+            promptHash = ran.promptHash ?: return null,
+        )
+        return ReuseKey(textHash, ran.requestedLanguage, settings)
+    }
 
     companion object {
         /**
          * 2: `nativeLanguage`; an attempt's answer is `raw`, the model's own text.
          * 3: `requestedLanguage` is a language code, an attempt's `failure` a token.
+         * 4: one session per card; an attempt keeps the language and settings it ran with,
+         *    and the session's are the latest attempt's.
          */
-        const val SCHEMA = 3
+        const val SCHEMA = 4
     }
 }
 
-/** One request to the model within a session: the first check, or a re-check. */
+/** One request to the model within a session: the first check, a re-check, or a check in another language. */
 @Serializable
 data class Attempt(
     val at: Long,
@@ -171,6 +205,18 @@ data class Attempt(
      * when the model was asked.
      */
     val reusedFrom: String? = null,
+    /*
+     * The language and settings this request ran with, as the session keeps them (see
+     * [SessionRecord.reuseKeyOf]). Null in rows written before schema 4, which ran every
+     * attempt with the session's; the requested language is also null for auto-detect.
+     */
+    val requestedLanguage: String? = null,
+    val nativeLanguage: String? = null,
+    val punctuation: String? = null,
+    val judgments: String? = null,
+    val provider: String? = null,
+    val model: String? = null,
+    val promptHash: String? = null,
 ) {
     /** Whether a verdict came back and was read: the card showed it. */
     val succeeded: Boolean get() = failure == null && raw != null
@@ -202,8 +248,8 @@ data class SuggestionRecord(
 
 /**
  * The settings a check runs with that change its answer, as a session keeps them: the
- * options and provider as tokens, the writer's own language as the prompt names it.
- * Every attempt of a session ran with the same ones.
+ * options and provider as tokens, the writer's own language as the prompt names it. They
+ * can change while a card is up; each attempt keeps the ones it ran with.
  */
 data class SessionSettings(
     /** The writer's own language; null for sessions recorded before it was kept. */
@@ -216,7 +262,7 @@ data class SessionSettings(
     val promptHash: String,
 )
 
-/** Everything a check must share with an earlier one for the earlier verdict to be shown again. */
+/** Everything a check must share with an earlier attempt for that attempt's verdict to be shown again. */
 data class ReuseKey(
     val textHash: String,
     /** A language code, or null for auto-detect. */
@@ -250,6 +296,12 @@ data class SessionSummary(
 /** A session with its suggestions, for the detail view; one line of the export has its shape. */
 @Serializable
 data class SessionDetail(val session: SessionRecord, val suggestions: List<SuggestionRecord>) {
+    /**
+     * The [decided attempt][decidedAttempt] when it ran with [key]'s text, language and
+     * settings, so its verdict can be shown again for a check with [key]; else null.
+     */
+    fun keptFor(key: ReuseKey): Int? = decidedAttempt()?.takeIf { session.reuseKeyOf(it) == key }
+
     /**
      * The attempt the session's card ended on, whose answer is shown again (on its page, or
      * reused by a later check): the one the decided suggestions came from (those not

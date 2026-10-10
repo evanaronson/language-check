@@ -16,11 +16,12 @@ data class SessionContext(
 
 /**
  * Turns what happens on one card into history records. Pure Kotlin: it never touches
- * storage, the caller saves what it returns. One instance per session (per check()).
+ * storage, the caller saves what it returns. One instance per session, which is one
+ * per card, whatever changes while it's up (the language, the settings: see [runWith]).
  *
  * The caller reports, in order: the start (constructor), each attempt as it finishes,
  * every change to the revision the writer makes (accept, accept all, undo), copies,
- * and finally the close. See docs/history-spec.md, "Decisions, defined".
+ * changes of settings ([runWith]) or language ([changeLanguage]), and finally the close. See docs/history-spec.md, "Decisions, defined".
  *
  * The suggestions decided at the close are those of the *decided revision*: the last
  * one an attempt offered. An attempt that offers none (it failed, or found the text
@@ -64,6 +65,12 @@ class SessionRecording(
     private val copiedKinds = mutableSetOf<EditKind>()
 
     private var closed: SessionDetail? = null
+
+    /** The language the next attempts ask for (a code, null for auto-detect). */
+    private var language: String? = context.opening.requestedLanguage
+
+    /** The settings the next attempts run with. */
+    private var settings: SessionSettings = context.opening.settings
 
     init {
         val opening = context.opening
@@ -111,25 +118,64 @@ class SessionRecording(
         if (closed != null) return session
         val index = session.attempts.size
         if (revision != null) {
-            this.revision?.let { previous ->
-                previous.edits.forEach { superseded += Pending(revisionAttempt, it, Decision.Superseded, at) }
-            }
+            supersede(at)
             this.revision = revision
             revisionAttempt = index
-            everAccepted.clear()
-            copiedEdits.clear()
-            retiredInCopy.clear()
             remember(revision)
         }
-        val attempt = Attempt(at, settled, raw, failure, failureDetail, reusedFrom)
+        val settings = settings
+        val attempt = Attempt(
+            at, settled, raw, failure, failureDetail, reusedFrom,
+            requestedLanguage = language,
+            nativeLanguage = settings.nativeLanguage,
+            punctuation = settings.punctuation,
+            judgments = settings.judgments,
+            provider = settings.provider,
+            model = settings.model,
+            promptHash = settings.promptHash,
+        )
         val succeeded = failure == null
         session = session.copy(
+            // The session's language and settings are the latest attempt's.
+            requestedLanguage = language,
+            nativeLanguage = settings.nativeLanguage,
+            punctuation = settings.punctuation,
+            judgments = settings.judgments,
+            provider = settings.provider,
+            model = settings.model,
+            promptHash = settings.promptHash,
             updatedAt = maxOf(session.updatedAt, at),
             attempts = session.attempts + attempt,
             meaning = if (succeeded) meaning else session.meaning,
             status = if (succeeded) status ?: session.status else session.status,
         )
         return session
+    }
+
+    /**
+     * The attempts from now on ask for [language] (a code, null for auto-detect) with
+     * [settings]: the settings changed while the card was up. Each attempt records what it
+     * ran with, and the session takes it with the attempt. A card is one session whatever
+     * changes.
+     */
+    fun runWith(language: String?, settings: SessionSettings) {
+        if (closed != null) return
+        this.language = language
+        this.settings = settings
+    }
+
+    /**
+     * The writer picked another [language] on the open card, which checks the text again in
+     * it ([runWith], with [settings]). The card starts over (nothing accepted is carried over
+     * to a review in another language), so the revision on offer is replaced now, whatever
+     * the next attempt brings: its suggestions become [Decision.Superseded].
+     */
+    fun changeLanguage(language: String?, settings: SessionSettings, at: Long) {
+        if (closed != null) return
+        runWith(language, settings)
+        supersede(at)
+        revision = null
+        revisionAttempt = -1
     }
 
     /**
@@ -187,6 +233,16 @@ class SessionRecording(
         )
         val rows = (superseded + current).map { it.record(session, at) }
         return SessionDetail(session, rows).also { closed = it }
+    }
+
+    /** The revision on offer is replaced: its suggestions are decided as [Decision.Superseded]. */
+    private fun supersede(at: Long) {
+        revision?.let { previous ->
+            previous.edits.forEach { superseded += Pending(revisionAttempt, it, Decision.Superseded, at) }
+        }
+        everAccepted.clear()
+        copiedEdits.clear()
+        retiredInCopy.clear()
     }
 
     private fun remember(revision: Revision) {

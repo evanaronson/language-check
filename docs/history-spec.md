@@ -14,6 +14,8 @@ Status: built (v1), branch `feature/history`. What isn't built yet is marked bel
 | Raw data access | Should be available | Export in v1 |
 | Where history lives | Home-first: the launcher screen becomes Home with Recent; Settings behind a gear; no button on the card | See UX |
 | Other users | Possibly friends, not public | On by default, plainly worded; consent moment designed before friends install |
+| What's recorded (10 Oct) | Only checks of text from other apps (selection menu, accessibility button), not the app's own "Try it" card | `Origin.recorded`; version 4 deletes the tester's old sessions |
+| What a record is (10 Oct) | One record per popup: nothing a writer does while it's up (another language, other settings) makes a second one | Each attempt keeps the language and settings it ran with; the session has the latest attempt's |
 
 Linguize remembers every check and what came of it, on the phone, so that later it can tell you the kinds of mistakes you tend to make. This document is the analysis and the spec for the recording half. The insight half ("you drop accents on verb endings") is a later feature that can't exist until there is history to read.
 
@@ -44,7 +46,7 @@ Two things make this harder than "write a row":
 
 ## How it fits the app
 
-The app already has one place that knows everything about a check: `CheckViewModel` owns the text, the language, the settled answers, the revision (every suggested edit and what's accepted), and the moment the card closes. Recording hooks in there and nowhere else; reading a past session back into a card (`history/Replay.kt`) is history's too. The three hosts (selection menu, accessibility button, settings tester) pass `check()` an `origin`, and the first two the package the text came from.
+The app already has one place that knows everything about a check: `CheckViewModel` owns the text, the language, the settled answers, the revision (every suggested edit and what's accepted), and the moment the card closes. Recording hooks in there and nowhere else; reading a past session back into a card (`history/Replay.kt`) is history's too. The three hosts (selection menu, accessibility button, the "Try it" card on Home) pass `check()` an `origin`, and the first two the package the text came from. Only the first two are recorded (`Origin.recorded`, decided in `CheckHistory.open`): "Try it" is for trying the app, not writing, so it opens no session, looks up no kept answer and writes nothing.
 
 ```
 CheckViewModel ──▶ CheckHistory ──▶ SessionRecording
@@ -52,9 +54,9 @@ CheckViewModel ──▶ CheckHistory ──▶ SessionRecording
                        └─writes─▶ HistoryStore ◀── SqliteHistoryStore (history/)
 ```
 
-- `SessionRecording` turns what happens on one card into records: one session and its suggestions. It's pure Kotlin with no Android or storage in it, so the mapping (which suggestion ended up accepted, undone, ignored, retired, copied) is unit-tested like the edit engine. One instance per `check()`.
+- `SessionRecording` turns what happens on one card into records: one session and its suggestions. It's pure Kotlin with no Android or storage in it, so the mapping (which suggestion ended up accepted, undone, ignored, retired, copied) is unit-tested like the edit engine. One instance per `check()`, which is one per card: nothing the writer does while it's up starts another.
 - `CheckHistory` is what the view model talks to. It opens the session, queues the writes, reads whether history is on before each one, and races the model against a kept answer (see *Reusing a kept answer*). Its failures are logged and never reach the card.
-- What a check runs with (provider, model, options, native language, prompt hash) is read once per run into `CheckContext`, the one place that lists it. A session records it as `SessionSettings` (`CheckContext.stored`, tokens), the reuse lookup matches on it with the text and requested language, and the overlay's card compares it to tell whether Settings changed anything (`CheckViewModel.recheckIfStale`).
+- What a check runs with (provider, model, options, native language, prompt hash) is read once per run into `CheckContext`, the one place that lists it. Each attempt records it (`CheckContext.stored`, tokens) with the language it asked for, the session has the latest attempt's as `SessionSettings`, the reuse lookup matches an attempt's with the text and requested language, and the overlay's card compares it to tell whether Settings changed anything (`CheckViewModel.recheckIfStale`).
 - `HistoryStore` is an interface with one implementation, `SqliteHistoryStore`, on the framework's SQLite with hand-written SQL (`HistorySchema`). If storage changes (SQLDelight for an iOS port, a server), nothing above it does.
 - `App` has an application-wide coroutine scope. The close-of-card write happens as the view model is being cleared, when `viewModelScope` is already cancelled, so it needs a scope that outlives the screen. Writes are queued on it in order.
 - The selection menu's card is often the only thing of the app running, and a process with nothing running is the first one the system kills. So `CheckActivity.finish()` waits for the close to be written before the activity goes, blocking for 500 ms at most (`CheckHistory.awaitWrites`). The close is one short transaction, normally a few milliseconds; the limit only bites when the database is slow to open, and then the write goes on alone. A WorkManager job would be sturdier but is a new dependency and a second write path for a few milliseconds of risk.
@@ -63,9 +65,10 @@ CheckViewModel ──▶ CheckHistory ──▶ SessionRecording
 
 | Event | From | Recorded as |
 |---|---|---|
-| `check(text, language, origin, hostApp)` | any host | a new **session**, saved immediately with `closedAt = null`, unless history is off or the text is over the 3,000-character limit (the check refuses it anyway) |
-| verdict arrives, or fails | `run()` | an **attempt** appended to the session (the model's answer as it came, settled answers, failure, `reusedFrom` when a kept answer was shown) |
-| re-check with other settings | `run()` | the session is **closed** (nothing applied) and a new one opened: provider, model, options, prompt or native language changed while the card was up, so the attempts that follow belong to other settings |
+| `check(text, language, origin, hostApp)` | menu, button | a new **session**, saved immediately with `closedAt = null`, unless history is off or the text is over the 3,000-character limit (the check refuses it anyway). From "Try it": nothing, ever |
+| verdict arrives, or fails | `run()` | an **attempt** appended to the session (the model's answer as it came, settled answers, failure, `reusedFrom` when a kept answer was shown, and the language and settings it ran with); the session's language and settings become the attempt's |
+| re-check with other settings | `run()` (`recheckIfStale`) | nothing new: the same session, whose next attempt records the new provider, model, options, prompt or native language. Accepted changes carry over as on any re-check |
+| another language picked on the card | `changeLanguage()` | the same session. The card starts over in that language (nothing accepted or answered carries over: it's another review), so the revision on offer is `superseded` at once, whatever the next attempt brings; the next attempt records the new language, and the session ends with the last one picked. Raced against a kept answer like a first attempt |
 | `accept`, `acceptAll`, `undo` | card | the new revision, remembered in memory (`everAccepted`) to tell *undone* from *ignored* later; a change to a revision other than the decided one (a late report from an earlier attempt's card) is ignored |
 | Copy of a section's preview | card | remembered in memory: what that copy contained, exactly as the preview rendered it |
 | close: `dismiss()`, a new `check()`, or `onCleared()` | any host | the session is **closed**: final text, outcome, and the suggestion rows with their decisions |
@@ -83,13 +86,13 @@ Each suggestion ends the session with exactly one decision. The suggestions deci
 | `retired` | a fix overtaken by an accepted rewording (the rewording includes it) |
 | `copied` | the writer copied that section's preview and the suggestion was in it: accepted changes and that kind's remaining suggestions, as the preview rendered them. A fix the copied preview left out because a rewording in it replaced it is `retired`, not copied |
 | `ignored` | still on offer when the card closed |
-| `superseded` | from an earlier revision; a re-check (answered assumption, retry, new settings) that offered a revision of its own replaced it |
+| `superseded` | from an earlier revision; a re-check (answered assumption, retry, new settings) that offered a revision of its own replaced it, or another language was picked on the card |
 
 Rules at the close, as `SessionRecording` applies them:
 
 - **Something went back to the app** (`finalText` set): applied, then retired, then copied, then undone, then ignored; the first that holds.
 - **Nothing went back**: nothing is `accepted`. What was copied is `copied`; a fix inside an accepted rewording that was copied is `retired`; whatever else was accepted at some point is `undone`; the rest `ignored`.
-- **A failed or unclear attempt keeps the previous revision decided.** The card keeps that revision's accepted changes and applies them if the writer replaces the text, so only an attempt that offers a revision makes the previous one's suggestions `superseded`.
+- **A failed or unclear attempt keeps the previous revision decided.** The card keeps that revision's accepted changes and applies them if the writer replaces the text, so only an attempt that offers a revision makes the previous one's suggestions `superseded`. The exception is another language: the card drops the old review then, so its suggestions are `superseded` when the language changes.
 - **What was accepted and copied is tracked per revision.** A re-check carries identical accepted edits over as new edits, and they count as accepted in the new revision.
 - **`reusedFrom`**: an attempt answered from a kept verdict records the session it came from; its suggestions are recorded like any other attempt's.
 
@@ -107,7 +110,7 @@ Two tables. Rows are immutable once the session closes. Everything is designed s
 
 | Field | Tokens |
 |---|---|
-| `origin` | `menu` · `button` · `tester` |
+| `origin` | `menu` · `button` (`tester`, the "Try it" card, isn't recorded since version 4; the token stays so old rows can be found and deleted) |
 | `outcome` | `applied` · `copied` · `none` · `failed` · `abandoned` |
 | `status` | `ok` · `unclear` · `wrong_language` |
 | suggestion `kind` | `fix` · `natural` |
@@ -116,22 +119,22 @@ Two tables. Rows are immutable once the session closes. Everything is designed s
 | `judgments` | `both` · `fix` · `naturalize` |
 | `provider` | `gemini` · `openai` |
 
-### `sessions`, one per time the card opens
+### `sessions`, one per time the card opens (whatever changes while it's up)
 
 | Column | Notes |
 |---|---|
 | `startedAt`, `closedAt` | `closedAt` null while open |
 | `origin` | see above |
-| `hostApp` | package name of the app the text came from (menu: the calling package; button: the field's package); null for the tester or when unknown |
-| `requestedLanguage` | the ISO 639-1 code of the language the writer asked for (`ca`, `es`); null for auto. Versions 1 and 2 kept its English name, rewritten to the code by the upgrade |
+| `hostApp` | package name of the app the text came from (menu: the calling package; button: the field's package); null when unknown |
+| `requestedLanguage` | the ISO 639-1 code of the language the latest attempt asked for (`ca`, `es`): the last one picked on the card; null for auto. Versions 1 and 2 kept its English name, rewritten to the code by the upgrade |
 | `nativeLanguage` | the writer's own language, which the meaning and reasons were asked in; null for sessions recorded before version 2 |
 | `text` | what was checked |
 | `textHash` | short hash, for "same message checked again" without comparing texts |
 | `finalText` | what went back to the app; null when nothing was applied |
 | `outcome`, `status` | see above |
 | `punctuation`, `judgments` | the settings in force, as tokens; they change what gets suggested |
-| `provider`, `model`, `promptHash`, `appVersion` | so verdicts from different models and prompt versions aren't compared as if equal. Every attempt of a session ran with these (and `nativeLanguage`): a re-check with other settings starts a new session |
-| `attempts` | JSON: `[{at, settled: [{about, answer}], raw, failure?, failureDetail?, reusedFrom?}]`. The audit trail; never queried, kept so anything can be re-derived. `raw` is the model's answer text exactly as it came back, before it was read: fields the app doesn't know yet are in it, and it's kept as well when it couldn't be read (a `BadResponse` failure); null when no answer came. `failure` is the `CheckFailure.Reason`'s token (`offline`, `bad_response`, …; versions 1 and 2 kept the constant name, rewritten by the upgrade); the language the model judged the text as is in the raw answer, not a column. Sessions recorded before version 2 hold the verdict as the app had read and re-encoded it (unknown fields dropped), moved to `raw` by the upgrade |
+| `provider`, `model`, `promptHash`, `appVersion` | so verdicts from different models and prompt versions aren't compared as if equal. Like `punctuation`, `judgments`, `nativeLanguage` and `requestedLanguage`, the latest attempt's: they can change while the card is up, and each attempt keeps its own |
+| `attempts` | JSON: `[{at, settled: [{about, answer}], raw, failure?, failureDetail?, reusedFrom?, requestedLanguage?, nativeLanguage?, punctuation?, judgments?, provider?, model?, promptHash?}]`. The last seven are what the attempt ran with (`SessionRecord.reuseKeyOf`), named as the session's columns; rows from before version 4 got the session's from the upgrade, and a row of schema below 4 is read as running every attempt with the session's. The audit trail; never queried, kept so anything can be re-derived. `raw` is the model's answer text exactly as it came back, before it was read: fields the app doesn't know yet are in it, and it's kept as well when it couldn't be read (a `BadResponse` failure); null when no answer came. `failure` is the `CheckFailure.Reason`'s token (`offline`, `bad_response`, …; versions 1 and 2 kept the constant name, rewritten by the upgrade); the language the model judged the text as is in the raw answer, not a column. Sessions recorded before version 2 hold the verdict as the app had read and re-encoded it (unknown fields dropped), moved to `raw` by the upgrade |
 | `meaning` | from the last successful attempt |
 
 ### `suggestions`, one per edit the writer saw
@@ -146,13 +149,14 @@ Two tables. Rows are immutable once the session closes. Everything is designed s
 
 ### Versions and upgrades
 
-The database has a version (`HistorySchema.VERSION`, for `SQLiteOpenHelper`) and every row a `schema` (its shape, as it would travel). Both are 3:
+The database has a version (`HistorySchema.VERSION`, for `SQLiteOpenHelper`) and every row a `schema` (its shape, as it would travel). Both are 4:
 
 - **1**, the first history builds: enums stored by constant name (`Accepted`, `Gemini`), the answer under `verdict`, no `nativeLanguage`; the earliest had no `status` column either (builds after the token change added it without changing the version).
 - **2**: tokens, `raw`, `nativeLanguage`. The upgrade from 1 adds the missing columns, rewrites every name-encoded value to its token (so Recent's counts and the reuse lookup, which compare tokens, see old rows), moves each attempt's `verdict` to `raw`, and sets `schema` to 2, in the one transaction the framework opens for it.
 - **3**: `requestedLanguage` as a language code, an attempt's `failure` as a token. The upgrade from 2 (and from 1, after the steps above) rewrites the language names and failure names it knows; the names it spells out are frozen, since those versions are done, and a test holds them to the enums.
+- **4**: one session per card, and nothing from "Try it". The upgrade from 3 (and from 1 and 2, after the steps above) deletes the sessions with origin `tester` and their suggestions (explicitly, though the foreign key cascades too, so the delete doesn't depend on the connection's foreign-key setting; `secure_delete` overwrites the freed pages), and gives each attempt the session's language and settings, which every attempt of those versions ran with.
 
-A version with no way up (none exists; a bug or a hand-edited file) isn't refused, which would turn history off for good with only a log line: the tables are dropped and made afresh, and that is logged. A downgrade (an older build installed over a newer one) is still refused by the framework; history is then off until the newer build is back. Each new version adds its step to `HistorySchema.upgrade` and a test that upgrades a database made with the previous version's statements, as `SqliteHistoryStoreTest` does for version 1 (from commit 7237d59) and version 2.
+A version with no way up (none exists; a bug or a hand-edited file) isn't refused, which would turn history off for good with only a log line: the tables are dropped and made afresh, and that is logged. A downgrade (an older build installed over a newer one) is still refused by the framework; history is then off until the newer build is back. Each new version adds its step to `HistorySchema.upgrade` and a test that upgrades a database made with the previous version's statements, as `SqliteHistoryStoreTest` does for version 1 (from commit 7237d59), version 2 and version 3.
 
 Why not an event log? An append-only log of every tap is the purest shape for sync and would capture undo trajectories exactly, but it needs projection code from day one to show anything, and the insight feature would be a projection too. Two tables that a human can read in a SQLite browser, with the raw verdicts kept as JSON for anything we didn't think of, is the smaller debt. The `attempts` JSON is the escape hatch: if a future question needs something the columns don't have, it's in there.
 
@@ -236,7 +240,7 @@ The glyph is Material's `history`: a clock with a counter-clockwise arrow. It's 
 ### Privacy, stated plainly
 
 - Nothing leaves the phone. The data extraction rules already exclude the app from backups and device transfer, so history doesn't land in Google's cloud.
-- The tester's text is recorded like any other check, tagged `origin = tester`, and the insight feature should exclude it by default. Recent doesn't separate it yet. "Everything you check" is simple to explain; exceptions aren't.
+- Text checked in the app's own "Try it" card isn't recorded: it's for trying Linguize, not writing, and would only skew the insights. Everything checked in another app is.
 - Failed checks are recorded (half the reliability story). They are not hidden from Recent yet; a failed row shows in the error colour.
 - Read-only selections are recorded; their suggestions can only end as `copied` or `ignored`.
 - Column encryption with the existing Keystore key is possible and costs: no SQL over text, slower lists, more code, and a server couldn't read it. The sandbox plus backup exclusion is the right level while the app is personal or among friends. Before friends install: the History section's wording is the consent, and recording should be shown once (a line on Home the first time), not assumed. That line isn't built; Recent only says so when history is off.
@@ -257,7 +261,9 @@ On a fresh check, `CheckHistory.firstAttempt` starts the model request first, be
 - the kept verdict arrives first: it is turned into a result, shown, and the request is cancelled; the attempt records `reusedFrom`;
 - the model answers first (or the lookup finds nothing, or fails): the model's answer is shown at once and the lookup is cancelled. The lookup can never add latency.
 
-A session qualifies when it has the same text hash, requested language, native language, punctuation, judgments, provider, model and prompt hash; started within 10 minutes of the new one; is closed and not `failed`; and its last attempt succeeded. The newest match wins. What's shown again is its *decided attempt*'s answer, with that attempt's settled answers. Since a re-check with other settings starts a new session, every attempt of a session was made with the settings the lookup matched. Nothing is looked up when history is off or the text isn't recorded.
+Another language picked on the card (`CheckHistory.languageChanged`) races the same way, for the text in the new language, in the same session.
+
+Matching is per attempt, since a session's language and settings can change while its card is up. A session is a candidate when it has the same text hash and its latest attempt the same requested language, native language, punctuation, judgments, provider, model and prompt hash (the query, on the session's columns); started within 10 minutes of the new check; is closed and not `failed`; and its last attempt succeeded. What's shown again is its *decided attempt*'s answer, with that attempt's settled answers, and only when that attempt itself ran with the same language and settings (`SessionDetail.keptFor`, checked by the store and again by `CheckHistory`): a card that ended on an answer made before its settings changed is never shown under the new ones. The newest candidate that qualifies wins. Nothing is looked up when history is off or the text isn't recorded ("Try it").
 
 **The decided attempt** (`SessionDetail.decidedAttempt`) is the one place that says which attempt a session's card ended on: the attempt the session's decided suggestions (those not `superseded`) came from, or else the last attempt that succeeded. Reuse, the past check's page and its settled answers all use it.
 
@@ -285,12 +291,14 @@ Acceptance, the ones worth spelling out:
 - Given a fix was accepted and a rewording covering it was then accepted, when the card closes, then the fix is `retired` and the rewording `accepted`, and "changes applied" on the card still reads 1.
 - Given the writer taps Replace then Undo then closes, then the suggestion is `undone`, not `ignored`.
 - Given history is off, when a check runs, then no row is written, and the count in settings doesn't change.
+- Given a check in the "Try it" card, then no row is written and nothing is looked up, whatever is done on the card.
+- Given a popup whose language is toggled several times and whose settings change, when it closes, then there is exactly one session, closed once, with the last language picked and one attempt per check, each with the language and settings it ran with.
 - Given 2,000 sessions, when settings opens, then it opens as fast as today (the count is one indexed query, observed as a Flow).
 
 ### Should have (v1.5)
 
 - [x] `hostApp` recorded (menu: `callingPackage`; button: the field's package) and shown in Recent.
-- [ ] Recent hides failed checks and the tester by default, with a way to show them.
+- [ ] Recent hides failed checks by default, with a way to show them.
 
 ### Later (designed for, not built)
 
@@ -323,5 +331,5 @@ Avoided:
 
 0. Prompt: `language`, examples, eval. Ship on its own; it's visible nowhere and de-risks the rest.
 1. Record: store, recording, view-model hook; Home/Settings split with the Recent list and the History section; export; instant re-open; host app in Recent. Built.
-2. Filters (failed checks, tester); a first-time line about recording.
+2. Filters (failed checks); a first-time line about recording.
 3. Insights: a separate spec, written once there are a few hundred fixes to look at.

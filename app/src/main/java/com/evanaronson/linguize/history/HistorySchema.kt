@@ -20,7 +20,8 @@ import com.evanaronson.linguize.core.Verdict
  * Versions: 1 was the first history build (enums stored by constant name, no `status`
  * at first, an attempt's answer under `verdict`); 2 adds `nativeLanguage` and stores
  * tokens and `raw`; 3 stores the requested language as a code and an attempt's failure
- * as a token. [upgrade] says how to get from each older version to this one.
+ * as a token; 4 records no checks from the app's own "Try it" card, and an attempt keeps
+ * the language and settings it ran with (a card is one session, whatever changes). [upgrade] says how to get from each older version to this one.
  */
 internal object HistorySchema {
     const val NAME = "history.db"
@@ -29,7 +30,7 @@ internal object HistorySchema {
      * The database's version, for SQLiteOpenHelper. Separate from [SessionRecord.SCHEMA],
      * which is the shape of a row as it would travel to a server.
      */
-    const val VERSION = 3
+    const val VERSION = 4
 
     const val SESSIONS = "sessions"
     const val SUGGESTIONS = "suggestions"
@@ -204,8 +205,14 @@ internal object HistorySchema {
     /** Every table, for starting over when an old database can't be upgraded. */
     val DROP = listOf("DROP TABLE IF EXISTS $SUGGESTIONS", "DROP TABLE IF EXISTS $SESSIONS")
 
-    /** A session's attempts, for rewriting them on an upgrade. */
-    const val ALL_ATTEMPTS = """SELECT "id", "attempts" FROM $SESSIONS"""
+    /**
+     * The columns of a session that each attempt keeps for itself from schema 4 on: the
+     * language and settings it ran with. Named alike in the row and in an attempt's JSON.
+     */
+    val ATTEMPT_CONTEXT = listOf("requestedLanguage", "nativeLanguage", "punctuation", "judgments", "provider", "model", "promptHash")
+
+    /** A session's attempts, with the language and settings they ran with, for rewriting them on an upgrade. */
+    val ALL_ATTEMPTS = """SELECT "id", ${quoted(ATTEMPT_CONTEXT)}, "attempts" FROM $SESSIONS"""
 
     const val SET_ATTEMPTS = """UPDATE $SESSIONS SET "attempts" = ? WHERE "id" = ?"""
 
@@ -218,7 +225,10 @@ internal object HistorySchema {
      * from the token change on added it without changing the version. Both had enums by
      * constant name ("Accepted", "Gemini"), which become tokens here, so the counts in
      * Recent and the reuse lookup, which compare tokens, see every row. Versions 1 and 2
-     * kept the requested language by its English name, which becomes its code.
+     * kept the requested language by its English name, which becomes its code. Versions 1
+     * to 3 recorded checks made in the app's "Try it" card, which aren't history: those
+     * sessions are deleted, with their suggestions (explicitly, though the foreign key
+     * cascades too: the delete must not depend on the connection's foreign-key setting).
      */
     fun upgrade(from: Int, sessionColumns: Set<String>): List<String>? {
         if (from !in 1 until VERSION) return null
@@ -236,6 +246,7 @@ internal object HistorySchema {
                 add(renaming(SUGGESTIONS, "decision", Decision.tokens.renames()))
             }
             add(renaming(SESSIONS, "requestedLanguage", Language.all.associate { it.name to it.code }))
+            addAll(DELETE_UNRECORDED)
             // Rows now have this build's shape.
             add("""UPDATE $SESSIONS SET "schema" = ${SessionRecord.SCHEMA}""")
             add("""UPDATE $SUGGESTIONS SET "schema" = ${SessionRecord.SCHEMA}""")
@@ -254,6 +265,19 @@ internal object HistorySchema {
         val cases = renames.entries.joinToString(" ") { (from, to) -> "WHEN '$from' THEN '$to'" }
         val names = renames.keys.joinToString { "'$it'" }
         return """UPDATE $table SET "$column" = CASE "$column" $cases END WHERE "$column" IN ($names)"""
+    }
+
+    /**
+     * Deletes the sessions of origins that aren't [recorded][Origin.recorded] (the tester,
+     * which builds before version 4 recorded) and their suggestions. By token, after version
+     * 1's names have become tokens.
+     */
+    val DELETE_UNRECORDED: List<String> = run {
+        val origins = Origin.entries.filterNot { it.recorded }.joinToString { "'${it.token}'" }
+        listOf(
+            """DELETE FROM $SUGGESTIONS WHERE "sessionId" IN (SELECT "id" FROM $SESSIONS WHERE "origin" IN ($origins))""",
+            """DELETE FROM $SESSIONS WHERE "origin" IN ($origins)""",
+        )
     }
 
     const val DELETE_SUGGESTIONS_OF = """DELETE FROM $SUGGESTIONS WHERE "sessionId" = ?"""

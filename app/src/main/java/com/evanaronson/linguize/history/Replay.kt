@@ -29,8 +29,10 @@ fun replay(detail: SessionDetail, parse: (String) -> Verdict): Replayed? {
     val index = detail.decidedAttempt() ?: return null
     val attempt = detail.session.attempts[index]
     val result = try {
-        val judgments = Judgments.tokens.decode(detail.session.judgments) ?: Judgments.Both
-        val requested = detail.session.requestedLanguage
+        // What that attempt ran with: the card's language and settings may have changed after it.
+        val ran = detail.session.reuseKeyOf(index) ?: detail.session.reuseKey
+        val judgments = Judgments.tokens.decode(ran.settings.judgments) ?: Judgments.Both
+        val requested = ran.requestedLanguage
         val expected = Language.read(requested)?.name ?: requested
         interpret(detail.session.text, parse(attempt.raw ?: return null), judgments, expectedLanguage = expected)
     } catch (_: Exception) {

@@ -37,11 +37,13 @@ interface HistoryEnvironment {
 }
 
 /**
- * What a session records about how its check runs, known when it starts. Every attempt of
- * a session runs with the same: a re-check with a different one starts a new session
- * ([recheck][CheckHistory.recheck]).
+ * How a check runs: where it was started, and the language and settings it asks with. The
+ * language and settings can change while the card is up ([recheck][CheckHistory.recheck],
+ * [languageChanged][CheckHistory.languageChanged]); the card stays one session, and each
+ * attempt records what it ran with.
  */
 data class Opening(
+    /** Where the check was started; only an [Origin.recorded] one is recorded. */
     val origin: Origin,
     /** The app the text came from, when known. */
     val hostApp: String?,
@@ -73,11 +75,16 @@ data class Answer<T>(val value: T, val reused: Kept?)
  *   in the order they were made, and their failures are only logged.
  * - [HistoryEnvironment.enabled] is read before every write. Turned off while a card is
  *   open, the open session stops being recorded: nothing more is written for it.
+ * - Only checks of text from other apps are recorded ([Origin.recorded]): one started in
+ *   the app itself ("Try it") opens no session, looks up nothing and writes nothing.
  * - A text over [maxChars] isn't recorded: the check refuses it before any request.
- * - The first attempt of a session races the model against a kept verdict for the same
- *   text and settings (see [firstAttempt]); the request leaves before any history work.
- * - A session holds the attempts made with one [Opening]: a re-check with another
- *   (settings changed while the card was up) closes it and opens a new one ([recheck]).
+ * - The first attempt of a session, and the first in another language, races the model
+ *   against a kept verdict for the same text, language and settings (see [firstAttempt]);
+ *   the request leaves before any history work. A kept verdict is an attempt's, matched by
+ *   the language and settings that attempt ran with ([SessionDetail.keptFor]).
+ * - A card is one session, whatever changes while it's up: other settings ([recheck]) or
+ *   another language ([languageChanged]). Each attempt records the language and settings
+ *   it ran with, and the session has the latest attempt's.
  *
  * Not thread-safe: call it from one thread (the main thread, in the app).
  */
@@ -118,12 +125,40 @@ class CheckHistory(
         opening: Opening,
         ask: suspend () -> T,
         reuse: suspend (Kept) -> T?,
+    ): Answer<T> = race(ask, reuse) { open(text, opening)?.reuseKey }
+
+    /**
+     * The writer picked another language on the open card, and [text] is checked again in
+     * it ([opening] has the new [Opening.requestedLanguage], and the settings as they are
+     * now): the open session gets the attempt, so a card is one session however often its
+     * language changes. The revision it offered is superseded ([SessionRecording.changeLanguage]).
+     * Like [firstAttempt], starts [ask] at once and races it against a kept verdict for the
+     * text in the new language. When no session is open (the first check was cancelled
+     * before it opened one), opens one as [firstAttempt] would.
+     */
+    suspend fun <T> languageChanged(
+        text: String,
+        opening: Opening,
+        ask: suspend () -> T,
+        reuse: suspend (Kept) -> T?,
+    ): Answer<T> = race(ask, reuse) { switchLanguage(text, opening) }
+
+    /**
+     * Starts [ask] at once, then runs [prepare], which gives what the attempt must match in
+     * a kept verdict (or null when nothing is recorded), and while the request runs looks for
+     * one. See [firstAttempt].
+     */
+    private suspend fun <T> race(
+        ask: suspend () -> T,
+        reuse: suspend (Kept) -> T?,
+        prepare: suspend () -> ReuseKey?,
     ): Answer<T> = coroutineScope {
         // Undispatched: the request is on its way before anything below runs.
         val answer = async(start = CoroutineStart.UNDISPATCHED) { capture { ask() } }
-        val opened = open(text, opening)
+        val key = prepare()
+        val since = clock() - reuseWithin
         // Not a child: a blocking query that's slow must never be waited for.
-        val lookup: Deferred<Kept?>? = opened?.let { session -> scope.async { find(session) } }
+        val lookup: Deferred<Kept?>? = key?.let { scope.async { find(it, since) } }
         try {
             val kept = lookup?.let {
                 select<Kept?> {
@@ -145,27 +180,40 @@ class CheckHistory(
     }
 
     /**
-     * Before a re-check of the open session's text with [opening]: when it isn't what the
-     * session was opened with (the provider, model, options, prompt or native language
-     * changed while the card was up), closes the session as nothing applied and opens a new
-     * one, so that every attempt of a session, and every answer reused from it, was made
-     * with the settings it records. Does nothing when no session is open.
+     * Before a re-check of the open session's text with [opening]: when the settings
+     * changed while the card was up (the provider, model, options, prompt or native
+     * language), the attempts from now on record the new ones, and so does the session with
+     * the next attempt. It stays one session: a card is one, whatever changes. Does nothing
+     * when no session is open.
      */
-    suspend fun recheck(text: String, opening: Opening) {
-        if (recording == null || opening == this.opening) return
-        close(finalText = null)
-        open(text, opening)
+    fun recheck(opening: Opening) {
+        val recording = recording ?: return
+        if (opening == this.opening) return
+        quietly("change the settings") { recording.runWith(opening.requestedLanguage, opening.settings) } ?: return
+        this.opening = opening
+    }
+
+    /**
+     * Before the attempt in another language: the open session's next attempts run with
+     * [opening]'s language and settings, and its card starts over; or, when none is open,
+     * one is opened. Returns what a kept verdict must match, or null when nothing is recorded.
+     */
+    private suspend fun switchLanguage(text: String, opening: Opening): ReuseKey? {
+        val recording = recording ?: return open(text, opening)?.reuseKey
+        quietly("change the language") { recording.changeLanguage(opening.requestedLanguage, opening.settings, clock()) } ?: return null
+        this.opening = opening
+        return ReuseKey(recording.session.textHash, opening.requestedLanguage, opening.settings)
     }
 
     /**
      * Opens a session for [text], saved right away; returns it, or null when it isn't
-     * recorded (history is off, or the text is over [maxChars]). The environment is read
-     * on [io].
+     * recorded (the origin isn't [recorded][Origin.recorded], history is off, or the text
+     * is over [maxChars]). The environment is read on [io].
      */
     internal suspend fun open(text: String, opening: Opening): SessionRecord? {
         recording = null
         this.opening = null
-        if (text.length > maxChars) return null
+        if (!opening.origin.recorded || text.length > maxChars) return null
         val context = withContext(io) {
             quietly("open a session") {
                 if (!environment.enabled) return@quietly null
@@ -246,10 +294,16 @@ class CheckHistory(
         lastWrite?.join()
     }
 
-    /** The newest kept answer for [session]'s text and settings, or null. Never throws. */
-    private suspend fun find(session: SessionRecord): Kept? = quietly("look for a kept answer") {
-        val kept = store.reusable(session.reuseKey, since = session.startedAt - reuseWithin) ?: return@quietly null
-        val attempt = kept.decidedAttempt()?.let(kept.session.attempts::get) ?: return@quietly null
+    /**
+     * The newest kept answer for [key] made [since] then, or null. Matched per attempt: the
+     * attempt shown again must itself have run with [key]'s language and settings, since
+     * they can change within a session ([SessionDetail.keptFor]; the store matches the same,
+     * this holds whatever store it is). Never throws.
+     */
+    private suspend fun find(key: ReuseKey, since: Long): Kept? = quietly("look for a kept answer") {
+        val kept = store.reusable(key, since) ?: return@quietly null
+        val index = kept.keptFor(key) ?: return@quietly null
+        val attempt = kept.session.attempts[index]
         Kept(kept.session.id, attempt.raw ?: return@quietly null, attempt.settled)
     }
 
