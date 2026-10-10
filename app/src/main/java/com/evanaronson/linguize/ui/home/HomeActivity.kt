@@ -33,10 +33,10 @@ import com.evanaronson.linguize.ui.theme.AppTheme
  * already open, that keeps what it showed (Try it's text, a past check) for next time.
  */
 class HomeActivity : ComponentActivity() {
-    private val settings: SettingsViewModel by viewModels()
-    private val check: CheckViewModel by viewModels()
-    private val history: HistoryViewModel by viewModels()
-    private val session: SessionViewModel by viewModels()
+    private val settings: SettingsViewModel by viewModels { SettingsViewModel.factory(App.of(this)) }
+    private val check: CheckViewModel by viewModels { CheckViewModel.factory(App.of(this)) }
+    private val history: HistoryViewModel by viewModels { HistoryViewModel.factory(App.of(this)) }
+    private val session: SessionViewModel by viewModels { SessionViewModel.factory(App.of(this)) }
 
     private var screen by mutableStateOf<Screen>(Screen.Home)
 
@@ -108,12 +108,12 @@ class HomeActivity : ComponentActivity() {
         super.onUserLeaveHint()
         backToCard = false
         beforeCard = null
-        (application as App).settingsLeft.value++
+        SettingsReturn.left()
     }
 
     override fun onPause() {
         super.onPause()
-        if (isFinishing) (application as App).settingsLeft.value++
+        if (isFinishing) SettingsReturn.left()
     }
 
     /** [existing]: the activity was already open, showing [screen], when [intent] came. */
@@ -147,7 +147,7 @@ class HomeActivity : ComponentActivity() {
         screen = before
         moveTaskToBack(true)
         // Not finishing, and not the user leaving: tell a card waiting behind Settings directly.
-        (application as App).settingsLeft.value++
+        SettingsReturn.left()
     }
 
     /**

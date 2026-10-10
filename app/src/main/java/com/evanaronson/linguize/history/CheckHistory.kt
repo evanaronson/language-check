@@ -2,12 +2,9 @@ package com.evanaronson.linguize.history
 
 import com.evanaronson.linguize.core.CheckResult
 import com.evanaronson.linguize.core.EditKind
-import com.evanaronson.linguize.core.Judgments
-import com.evanaronson.linguize.core.Punctuation
 import com.evanaronson.linguize.core.Revision
 import com.evanaronson.linguize.core.Settled
 import com.evanaronson.linguize.core.Verdict
-import com.evanaronson.linguize.llm.Provider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineStart
@@ -48,15 +45,9 @@ data class Opening(
     val origin: Origin,
     /** The app the text came from, when known. */
     val hostApp: String?,
-    /** The language asked for, by name; null for auto-detect. */
+    /** The language asked for, as its code (`Language.code`); null for auto-detect. */
     val requestedLanguage: String?,
-    /** The writer's own language, which the meaning and reasons are asked in. */
-    val nativeLanguage: String,
-    val punctuation: Punctuation,
-    val judgments: Judgments,
-    val provider: Provider,
-    val model: String,
-    val promptHash: String,
+    val settings: SessionSettings,
 )
 
 /** A verdict kept from an earlier session on the same text and settings, to show again. */
@@ -178,19 +169,7 @@ class CheckHistory(
         val context = withContext(io) {
             quietly("open a session") {
                 if (!environment.enabled) return@quietly null
-                SessionContext(
-                    origin = opening.origin,
-                    hostApp = opening.hostApp,
-                    requestedLanguage = opening.requestedLanguage,
-                    nativeLanguage = opening.nativeLanguage,
-                    punctuation = Stored.punctuation.encode(opening.punctuation),
-                    judgments = Stored.judgments.encode(opening.judgments),
-                    provider = Stored.provider.encode(opening.provider),
-                    model = opening.model,
-                    promptHash = opening.promptHash,
-                    appVersion = environment.appVersion,
-                    deviceId = environment.deviceId,
-                )
+                SessionContext(opening, appVersion = environment.appVersion, deviceId = environment.deviceId)
             }
         } ?: return null
         val opened = quietly("open a session") { SessionRecording(text, context, clock(), newId) } ?: return null
@@ -222,7 +201,7 @@ class CheckHistory(
     }
 
     /**
-     * An attempt failed for [reason] (a `CheckFailure.Reason` name). [raw] is the model's
+     * An attempt failed for [reason] (a `CheckFailure.Reason` token). [raw] is the model's
      * answer when one came but couldn't be read.
      */
     fun failed(settled: List<Settled>, reason: String, detail: String?, raw: String? = null) {

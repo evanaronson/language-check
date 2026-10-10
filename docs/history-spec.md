@@ -54,6 +54,7 @@ CheckViewModel ──▶ CheckHistory ──▶ SessionRecording
 
 - `SessionRecording` turns what happens on one card into records: one session and its suggestions. It's pure Kotlin with no Android or storage in it, so the mapping (which suggestion ended up accepted, undone, ignored, retired, copied) is unit-tested like the edit engine. One instance per `check()`.
 - `CheckHistory` is what the view model talks to. It opens the session, queues the writes, reads whether history is on before each one, and races the model against a kept answer (see *Reusing a kept answer*). Its failures are logged and never reach the card.
+- What a check runs with (provider, model, options, native language, prompt hash) is read once per run into `CheckContext`, the one place that lists it. A session records it as `SessionSettings` (`CheckContext.stored`, tokens), the reuse lookup matches on it with the text and requested language, and the overlay's card compares it to tell whether Settings changed anything (`CheckViewModel.recheckIfStale`).
 - `HistoryStore` is an interface with one implementation, `SqliteHistoryStore`, on the framework's SQLite with hand-written SQL (`HistorySchema`). If storage changes (SQLDelight for an iOS port, a server), nothing above it does.
 - `App` has an application-wide coroutine scope. The close-of-card write happens as the view model is being cleared, when `viewModelScope` is already cancelled, so it needs a scope that outlives the screen. Writes are queued on it in order.
 - The selection menu's card is often the only thing of the app running, and a process with nothing running is the first one the system kills. So `CheckActivity.finish()` waits for the close to be written before the activity goes, blocking for 500 ms at most (`CheckHistory.awaitWrites`). The close is one short transaction, normally a few milliseconds; the limit only bites when the database is slow to open, and then the write goes on alone. A WorkManager job would be sturdier but is a new dependency and a second write path for a few milliseconds of risk.
@@ -102,7 +103,7 @@ Two tables. Rows are immutable once the session closes. Everything is designed s
 
 **Every row has:** `id` (client-generated UUID, never an autoincrement), `createdAt` / `updatedAt` (epoch ms, UTC), `deletedAt` (reserved for sync; always null today, see *Sync-readiness*), `deviceId` (a random UUID made once per install), `schema` (integer, the shape of this row).
 
-**Stored values.** Enums are stored as fixed lowercase tokens (`history/Stored.kt`), spelled out rather than derived from constant names, the same in the database, the export and settings. A token this build doesn't know (written by a newer one) reads as null in the app and never crashes (an unknown origin too: Recent then shows no source); a suggestion with an unknown kind or decision is left out of the page and the counts. The export doesn't decode at all, so unknown tokens leave as they were stored.
+**Stored values.** Enums are stored as fixed lowercase tokens, spelled out on each enum's constants (`token`, with one `codec.Tokens` per enum) rather than derived from constant names, the same in the database, the export, settings and the prompt. Languages are stored by ISO 639-1 code (`Language.code`), failures by the reason's token. A token this build doesn't know (written by a newer one) reads as null in the app and never crashes (an unknown origin too: Recent then shows no source); a suggestion with an unknown kind or decision is left out of the page and the counts. The export doesn't decode at all, so unknown tokens leave as they were stored.
 
 | Field | Tokens |
 |---|---|
@@ -122,7 +123,7 @@ Two tables. Rows are immutable once the session closes. Everything is designed s
 | `startedAt`, `closedAt` | `closedAt` null while open |
 | `origin` | see above |
 | `hostApp` | package name of the app the text came from (menu: the calling package; button: the field's package); null for the tester or when unknown |
-| `requestedLanguage` | the language name the writer asked for; null for auto |
+| `requestedLanguage` | the ISO 639-1 code of the language the writer asked for (`ca`, `es`); null for auto. Versions 1 and 2 kept its English name, rewritten to the code by the upgrade |
 | `nativeLanguage` | the writer's own language, which the meaning and reasons were asked in; null for sessions recorded before version 2 |
 | `text` | what was checked |
 | `textHash` | short hash, for "same message checked again" without comparing texts |
@@ -130,7 +131,7 @@ Two tables. Rows are immutable once the session closes. Everything is designed s
 | `outcome`, `status` | see above |
 | `punctuation`, `judgments` | the settings in force, as tokens; they change what gets suggested |
 | `provider`, `model`, `promptHash`, `appVersion` | so verdicts from different models and prompt versions aren't compared as if equal. Every attempt of a session ran with these (and `nativeLanguage`): a re-check with other settings starts a new session |
-| `attempts` | JSON: `[{at, settled: [{about, answer}], raw, failure?, failureDetail?, reusedFrom?}]`. The audit trail; never queried, kept so anything can be re-derived. `raw` is the model's answer text exactly as it came back, before it was read: fields the app doesn't know yet are in it, and it's kept as well when it couldn't be read (a `BadResponse` failure); null when no answer came. `failure` is a `CheckFailure.Reason` name; the language the model judged the text as is in the raw answer, not a column. Sessions recorded before version 2 hold the verdict as the app had read and re-encoded it (unknown fields dropped), moved to `raw` by the upgrade |
+| `attempts` | JSON: `[{at, settled: [{about, answer}], raw, failure?, failureDetail?, reusedFrom?}]`. The audit trail; never queried, kept so anything can be re-derived. `raw` is the model's answer text exactly as it came back, before it was read: fields the app doesn't know yet are in it, and it's kept as well when it couldn't be read (a `BadResponse` failure); null when no answer came. `failure` is the `CheckFailure.Reason`'s token (`offline`, `bad_response`, …; versions 1 and 2 kept the constant name, rewritten by the upgrade); the language the model judged the text as is in the raw answer, not a column. Sessions recorded before version 2 hold the verdict as the app had read and re-encoded it (unknown fields dropped), moved to `raw` by the upgrade |
 | `meaning` | from the last successful attempt |
 
 ### `suggestions`, one per edit the writer saw
@@ -145,12 +146,13 @@ Two tables. Rows are immutable once the session closes. Everything is designed s
 
 ### Versions and upgrades
 
-The database has a version (`HistorySchema.VERSION`, for `SQLiteOpenHelper`) and every row a `schema` (its shape, as it would travel). Both are 2:
+The database has a version (`HistorySchema.VERSION`, for `SQLiteOpenHelper`) and every row a `schema` (its shape, as it would travel). Both are 3:
 
 - **1**, the first history builds: enums stored by constant name (`Accepted`, `Gemini`), the answer under `verdict`, no `nativeLanguage`; the earliest had no `status` column either (builds after the token change added it without changing the version).
 - **2**: tokens, `raw`, `nativeLanguage`. The upgrade from 1 adds the missing columns, rewrites every name-encoded value to its token (so Recent's counts and the reuse lookup, which compare tokens, see old rows), moves each attempt's `verdict` to `raw`, and sets `schema` to 2, in the one transaction the framework opens for it.
+- **3**: `requestedLanguage` as a language code, an attempt's `failure` as a token. The upgrade from 2 (and from 1, after the steps above) rewrites the language names and failure names it knows; the names it spells out are frozen, since those versions are done, and a test holds them to the enums.
 
-A version with no way up (none exists; a bug or a hand-edited file) isn't refused, which would turn history off for good with only a log line: the tables are dropped and made afresh, and that is logged. A downgrade (an older build installed over a newer one) is still refused by the framework; history is then off until the newer build is back. Each new version adds its step to `HistorySchema.upgrade` and a test that upgrades a database made with the previous version's statements, as `SqliteHistoryStoreTest` does for version 1 (from commit 7237d59).
+A version with no way up (none exists; a bug or a hand-edited file) isn't refused, which would turn history off for good with only a log line: the tables are dropped and made afresh, and that is logged. A downgrade (an older build installed over a newer one) is still refused by the framework; history is then off until the newer build is back. Each new version adds its step to `HistorySchema.upgrade` and a test that upgrades a database made with the previous version's statements, as `SqliteHistoryStoreTest` does for version 1 (from commit 7237d59) and version 2.
 
 Why not an event log? An append-only log of every tap is the purest shape for sync and would capture undo trajectories exactly, but it needs projection code from day one to show anything, and the insight feature would be a projection too. Two tables that a human can read in a SQLite browser, with the raw verdicts kept as JSON for anything we didn't think of, is the smaller debt. The `attempts` JSON is the escape hatch: if a future question needs something the columns don't have, it's in there.
 
@@ -161,10 +163,10 @@ Why not one JSON document per session? It would be simplest to write, but `sugge
 What's done now so a server later is additive:
 
 - UUIDs and `deviceId`: rows from two phones merge without collisions.
-- `updatedAt`: "everything changed since last sync" is one query.
+- `updatedAt`: "everything changed since last sync" is one query. It has no index yet; the sync that runs that query adds one.
 - `schema` and `promptHash` versions on the rows: the server never has to guess how to read an old row.
 - The row classes are `@Serializable` Kotlin with the columns' names and tokens: the wire format is the storage format. The export writes each row as it is stored, column by column (a `SessionDetail`'s shape per line), without decoding it, so nothing is lost or altered on the way out. Versioned, so that coupling is a feature, not a trap.
-- Nothing in a row depends on local state (no int ids, no references to settings).
+- Nothing in a row depends on local state (no int ids, no references to settings, no Kotlin constant names: languages are codes, everything enumerated a token).
 
 What isn't done, and what changed from the first plan:
 

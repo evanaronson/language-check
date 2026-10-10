@@ -1,5 +1,6 @@
 package com.evanaronson.linguize.core
 
+import com.evanaronson.linguize.codec.Tokens
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -22,11 +23,20 @@ data class Verdict(
     val natural: String = "",
     @SerialName("natural_changes") val naturalChanges: List<VerdictChange> = emptyList(),
 ) {
+    /** Each constant's [token] is its name in the answer's JSON too; a test holds the two together. */
     @Serializable
-    enum class Status {
-        @SerialName("ok") Ok,
-        @SerialName("unclear") Unclear,
-        @SerialName("wrong_language") WrongLanguage,
+    enum class Status(
+        /** What history keeps. */
+        val token: String,
+    ) {
+        @SerialName("ok") Ok("ok"),
+        @SerialName("unclear") Unclear("unclear"),
+        @SerialName("wrong_language") WrongLanguage("wrong_language"),
+        ;
+
+        companion object {
+            val tokens = Tokens(entries, Status::token)
+        }
     }
 }
 

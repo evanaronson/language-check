@@ -1,8 +1,5 @@
 package com.evanaronson.linguize.llm
 
-import android.content.Context
-import com.evanaronson.linguize.core.Judgments
-import com.evanaronson.linguize.core.Punctuation
 import com.evanaronson.linguize.core.Settled
 import com.evanaronson.linguize.core.Verdict
 import kotlinx.serialization.SerializationException
@@ -39,8 +36,8 @@ class Prompt(val system: String, schemaJson: String) {
     fun userMessage(request: CheckRequest) = buildString {
         val language = request.language?.let { "${it.name} (${it.variety})" } ?: "auto"
         appendLine("Language: $language")
-        appendLine("Punctuation: ${token(request.punctuation)}")
-        appendLine("Checks: ${token(request.judgments)}")
+        appendLine("Punctuation: ${request.punctuation.token}")
+        appendLine("Checks: ${request.judgments.token}")
         appendLine("Native: ${request.native} (write meaning, assumptions and reasons in ${request.native})")
         request.settled.forEach { appendLine("Settled: ${settledJson(it)}") }
         append("Text: $TEXT_OPEN${request.text}$TEXT_CLOSE")
@@ -57,12 +54,6 @@ class Prompt(val system: String, schemaJson: String) {
         }
     }
 
-    /**
-     * [verdict] as JSON, every field included, for keeping in history. It reads back with
-     * [parseVerdict]; fields the app doesn't know yet were already dropped when it was read.
-     */
-    fun verdictJson(verdict: Verdict): String = json.encodeToString(Verdict.serializer(), verdict)
-
     /** {"about":…,"answer":…} on one line: JSON escapes line breaks; the rest are spaces first. */
     private fun settledJson(settled: Settled): String = buildJsonObject {
         put("about", oneLine(settled.about))
@@ -72,18 +63,6 @@ class Prompt(val system: String, schemaJson: String) {
     /** Control characters and Unicode line and paragraph separators become spaces. */
     private fun oneLine(text: String): String =
         text.map { if (it.isISOControl() || it == '\u2028' || it == '\u2029') ' ' else it }.joinToString("")
-
-    private fun token(punctuation: Punctuation) = when (punctuation) {
-        Punctuation.Strict -> "strict"
-        Punctuation.Moderate -> "moderate"
-        Punctuation.Casual -> "casual"
-    }
-
-    private fun token(judgments: Judgments) = when (judgments) {
-        Judgments.Both -> "both"
-        Judgments.FixOnly -> "fix"
-        Judgments.NaturalizeOnly -> "naturalize"
-    }
 
     companion object {
         const val TEXT_OPEN = "<text>"
@@ -95,14 +74,9 @@ class Prompt(val system: String, schemaJson: String) {
          */
         const val MAX_OUTPUT_TOKENS = 8192
 
-        private val json = Json {
-            ignoreUnknownKeys = true
-            encodeDefaults = true
-        }
+        private val json = Json { ignoreUnknownKeys = true }
 
-        fun load(context: Context) = Prompt(
-            system = context.assets.open("check_prompt.md").bufferedReader().use { it.readText() },
-            schemaJson = context.assets.open("check_schema.json").bufferedReader().use { it.readText() },
-        )
+        /** The prompt as the app ships it, read with [read] (the app's assets): check_prompt.md and check_schema.json. */
+        fun load(read: (String) -> String) = Prompt(system = read("check_prompt.md"), schemaJson = read("check_schema.json"))
     }
 }

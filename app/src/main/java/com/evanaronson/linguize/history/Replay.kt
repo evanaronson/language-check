@@ -4,6 +4,7 @@ import com.evanaronson.linguize.core.CheckResult
 import com.evanaronson.linguize.core.Edit
 import com.evanaronson.linguize.core.EditKind
 import com.evanaronson.linguize.core.Judgments
+import com.evanaronson.linguize.core.Language
 import com.evanaronson.linguize.core.Revision
 import com.evanaronson.linguize.core.Settled
 import com.evanaronson.linguize.core.Verdict
@@ -28,8 +29,10 @@ fun replay(detail: SessionDetail, parse: (String) -> Verdict): Replayed? {
     val index = detail.decidedAttempt() ?: return null
     val attempt = detail.session.attempts[index]
     val result = try {
-        val judgments = Stored.judgments.decode(detail.session.judgments) ?: Judgments.Both
-        interpret(detail.session.text, parse(attempt.raw ?: return null), judgments, expectedLanguage = detail.session.requestedLanguage)
+        val judgments = Judgments.tokens.decode(detail.session.judgments) ?: Judgments.Both
+        val requested = detail.session.requestedLanguage
+        val expected = Language.read(requested)?.name ?: requested
+        interpret(detail.session.text, parse(attempt.raw ?: return null), judgments, expectedLanguage = expected)
     } catch (_: Exception) {
         return null
     }

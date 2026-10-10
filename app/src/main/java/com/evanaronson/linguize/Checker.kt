@@ -6,10 +6,8 @@ import com.evanaronson.linguize.core.Language
 import com.evanaronson.linguize.core.Punctuation
 import com.evanaronson.linguize.core.Settled
 import com.evanaronson.linguize.core.interpret
-import com.evanaronson.linguize.data.ApiKeys
-import com.evanaronson.linguize.data.Settings
-import com.evanaronson.linguize.history.Replayed
-import com.evanaronson.linguize.history.SessionDetail
+import com.evanaronson.linguize.data.CheckPreferences
+import com.evanaronson.linguize.data.ProviderKeys
 import com.evanaronson.linguize.llm.CheckFailure
 import com.evanaronson.linguize.llm.CheckRequest
 import com.evanaronson.linguize.llm.Prompt
@@ -18,18 +16,6 @@ import com.evanaronson.linguize.llm.ProviderClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-
-/** The settings a check runs with, read once so the request and the record of it agree. */
-data class CheckContext(
-    val provider: Provider,
-    val model: String,
-    val punctuation: Punctuation,
-    val judgments: Judgments,
-    /** The writer's own language, which the meaning and reasons are written in. */
-    val native: String,
-    /** [Prompt.hash] of the instructions and schema sent. */
-    val promptHash: String,
-)
 
 /** A finished check: what the card shows, the model's answer exactly as it came ([raw]), and the settings it ran with. */
 data class Checked(val result: CheckResult, val raw: String, val context: CheckContext)
@@ -40,8 +26,8 @@ data class Checked(val result: CheckResult, val raw: String, val context: CheckC
  * carries it as [CheckFailure.raw]. Storage, key decryption and the network run off the main thread.
  */
 class Checker(
-    private val settings: Settings,
-    private val keys: ApiKeys,
+    private val settings: CheckPreferences,
+    private val keys: ProviderKeys,
     private val prompt: Prompt,
     private val clients: Map<Provider, ProviderClient>,
 ) {
@@ -81,9 +67,6 @@ class Checker(
         val result = interpret(text, prompt.parseVerdict(raw), context.judgments, expectedLanguage = language?.name)
         Checked(result, raw, context)
     }
-
-    /** The card a past session ended with ([com.evanaronson.linguize.history.replay]), reading answers as checks do. */
-    fun replay(detail: SessionDetail): Replayed? = com.evanaronson.linguize.history.replay(detail, prompt::parseVerdict)
 
     /** Runs a short check with [model]; returns how long it took in milliseconds. */
     suspend fun testModel(provider: Provider, model: String): Long = failingAsCheckFailure {

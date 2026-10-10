@@ -22,7 +22,7 @@ import com.evanaronson.linguize.ui.theme.AppTheme
  * from, and hands back the text with any accepted changes when it closes.
  */
 class CheckActivity : ComponentActivity() {
-    private val check: CheckViewModel by viewModels()
+    private val check: CheckViewModel by viewModels { CheckViewModel.factory(App.of(this)) }
     private var selection: Selection? = null
     private var limited = false
 
@@ -34,7 +34,7 @@ class CheckActivity : ComponentActivity() {
         this.selection = selection
         val readOnly = intent.getBooleanExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, false)
         // Which menu entry was tapped decides the language: Catalanize, Castilianize, or Linguize to detect it.
-        val entry = (application as App).menu.entryFor(intent.component)
+        val entry = App.of(this).menu.entryFor(intent.component)
 
         // Any app can open this entry, so each one gets only a few checks a minute. A card already
         // limited stays limited when it's recreated, without counting again.

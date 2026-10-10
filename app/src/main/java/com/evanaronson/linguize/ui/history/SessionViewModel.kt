@@ -1,17 +1,23 @@
 package com.evanaronson.linguize.ui.history
 
-import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.evanaronson.linguize.App
+import com.evanaronson.linguize.history.HistoryStore
 import com.evanaronson.linguize.history.Replayed
 import com.evanaronson.linguize.history.SessionDetail
 import com.evanaronson.linguize.history.SessionRecord
+import com.evanaronson.linguize.history.replay
 import com.evanaronson.linguize.llm.CheckFailure
+import com.evanaronson.linguize.llm.Prompt
 import com.evanaronson.linguize.ui.card.CardState
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -34,10 +40,17 @@ sealed interface SessionPage {
     ) : SessionPage
 }
 
-/** Loads the past check the detail page shows, and deletes it. */
-class SessionViewModel(application: Application) : AndroidViewModel(application) {
-    private val app = application as App
-    private val labels = AppLabels(application.packageManager)
+/**
+ * Loads the past check the detail page shows, and deletes it. [prompt] reads kept answers
+ * as checks do; it's called off the main thread (the app's loads from assets on first use).
+ * Deleting runs on [appScope], since the page closes straight away.
+ */
+class SessionViewModel internal constructor(
+    private val history: HistoryStore,
+    private val prompt: () -> Prompt,
+    private val labels: AppLabels,
+    private val appScope: CoroutineScope,
+) : ViewModel() {
     private var id: String? = null
     private var job: Job? = null
 
@@ -53,12 +66,14 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
         this.id = id
         job?.cancel()
         job = viewModelScope.launch {
-            val detail = app.history.detail(id)
+            val detail = history.detail(id)
             page = if (detail == null) {
                 SessionPage.Missing
             } else {
-                // Creating the checker reads its prompt from assets, so not on the main thread.
-                withContext(Dispatchers.IO) { shown(detail, app.checker.replay(detail)) }
+                withContext(Dispatchers.IO) {
+                    val read = prompt()
+                    shown(detail, replay(detail, read::parseVerdict))
+                }
             }
         }
     }
@@ -67,14 +82,19 @@ class SessionViewModel(application: Application) : AndroidViewModel(application)
     fun delete() {
         val id = id ?: return
         this.id = null
-        app.appScope.launch { app.history.delete(id) }
+        appScope.launch { history.delete(id) }
     }
 
-    /** [replayed] is the card the session ended with ([com.evanaronson.linguize.history.replay]); null when there's none to show. */
+    /** [replayed] is the card the session ended with ([replay]); null when there's none to show. */
     private fun shown(detail: SessionDetail, replayed: Replayed?): SessionPage.Shown {
         val session = detail.session
-        val failure = session.attempts.lastOrNull()?.failure
-            ?.let { name -> CheckFailure.Reason.entries.firstOrNull { it.name == name } }
+        val failure = CheckFailure.Reason.tokens.decode(session.attempts.lastOrNull()?.failure)
         return SessionPage.Shown(session, labels.of(session.hostApp), replayed?.let(::readOnlyCard), failure)
+    }
+
+    companion object {
+        fun factory(app: App): ViewModelProvider.Factory = viewModelFactory {
+            initializer { SessionViewModel(app.history, prompt = { app.prompt }, AppLabels(app.packageManager), app.appScope) }
+        }
     }
 }

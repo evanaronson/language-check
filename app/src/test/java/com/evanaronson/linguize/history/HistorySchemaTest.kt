@@ -1,10 +1,13 @@
 package com.evanaronson.linguize.history
 
+import com.evanaronson.linguize.codec.Tokens
 import com.evanaronson.linguize.core.EditKind
 import com.evanaronson.linguize.core.Judgments
+import com.evanaronson.linguize.core.Language
 import com.evanaronson.linguize.core.Punctuation
 import com.evanaronson.linguize.core.Settled
 import com.evanaronson.linguize.core.Verdict
+import com.evanaronson.linguize.llm.CheckFailure
 import com.evanaronson.linguize.llm.Provider
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -25,7 +28,7 @@ class HistorySchemaTest {
         closedAt = 2_000,
         origin = Origin.Button,
         hostApp = "org.telegram.messenger",
-        requestedLanguage = "Catalan",
+        requestedLanguage = "ca",
         nativeLanguage = "English",
         text = "Com estas?\nBé.",
         textHash = "abc123",
@@ -85,32 +88,77 @@ class HistorySchemaTest {
         assertEquals("ok", session.values()["status"])
         assertEquals("accepted", suggestion.values()["decision"])
         assertEquals("fix", suggestion.values()["kind"])
-        assertEquals("wrong_language", Stored.status.encode(Verdict.Status.WrongLanguage))
-        assertEquals("naturalize", Stored.judgments.encode(Judgments.NaturalizeOnly))
-        assertEquals("casual", Stored.punctuation.encode(Punctuation.Casual))
-        assertEquals("openai", Stored.provider.encode(Provider.OpenAI))
+        assertEquals("wrong_language", Verdict.Status.tokens.encode(Verdict.Status.WrongLanguage))
+        assertEquals("naturalize", Judgments.tokens.encode(Judgments.NaturalizeOnly))
+        assertEquals("casual", Punctuation.tokens.encode(Punctuation.Casual))
+        assertEquals("openai", Provider.tokens.encode(Provider.OpenAI))
     }
 
     @Test
     fun everyTokenReadsBack() {
         fun <E : Enum<E>> roundTrips(tokens: Tokens<E>, entries: List<E>) = entries.forEach { assertEquals(it, tokens.decode(tokens.encode(it))) }
-        roundTrips(Stored.origin, Origin.entries)
-        roundTrips(Stored.decision, Decision.entries)
-        roundTrips(Stored.outcome, Outcome.entries)
-        roundTrips(Stored.editKind, EditKind.entries)
-        roundTrips(Stored.status, Verdict.Status.entries)
-        roundTrips(Stored.punctuation, Punctuation.entries)
-        roundTrips(Stored.judgments, Judgments.entries)
-        roundTrips(Stored.provider, Provider.entries)
+        roundTrips(Origin.tokens, Origin.entries)
+        roundTrips(Decision.tokens, Decision.entries)
+        roundTrips(Outcome.tokens, Outcome.entries)
+        roundTrips(EditKind.tokens, EditKind.entries)
+        roundTrips(Verdict.Status.tokens, Verdict.Status.entries)
+        roundTrips(Punctuation.tokens, Punctuation.entries)
+        roundTrips(Judgments.tokens, Judgments.entries)
+        roundTrips(Provider.tokens, Provider.entries)
+        roundTrips(CheckFailure.Reason.tokens, CheckFailure.Reason.entries)
+    }
+
+    @Test
+    fun whatUpgradesSpellOutMatchesTheEnums() {
+        // History spells out the names older versions kept, since it doesn't depend on llm.
+        assertEquals(Provider.tokens.renames(), HistorySchema.VERSION_1_PROVIDERS)
+        assertEquals(CheckFailure.Reason.tokens.renames(), LEGACY_FAILURES)
+        // A verdict's status is written with the same token in its JSON and in its column.
+        for (status in Verdict.Status.entries) {
+            assertEquals(status.token, Verdict.Status.serializer().descriptor.getElementName(status.ordinal))
+        }
+    }
+
+    @Test
+    fun version2UpgradesTheRequestedLanguageToItsCode() {
+        val statements = HistorySchema.upgrade(2, HistorySchema.SESSION_COLUMNS.toSet())!!
+        assertTrue(statements.any { it.contains("SET \"requestedLanguage\" = CASE") && it.contains("WHEN 'Catalan' THEN 'ca'") && it.contains("WHEN 'Spanish' THEN 'es'") })
+        // Nothing of version 1's renames: version 2 already stores tokens.
+        assertFalse(statements.any { it.contains("SET \"origin\"") || it.contains("ADD COLUMN") })
+        assertTrue(statements.any { it.contains("SET \"schema\" = ${SessionRecord.SCHEMA}") })
+        assertTrue(HistorySchema.upgrade(1, HistorySchema.SESSION_COLUMNS.toSet())!!.any { it.contains("WHEN 'Catalan' THEN 'ca'") })
+    }
+
+    @Test
+    fun anUpgradedAttemptKeepsItsFailureAsAToken() {
+        val v2 = """[{"at":1,"settled":[],"raw":null,"failure":"BadKey","failureDetail":"no"},{"at":2,"raw":"{}","failure":null}]"""
+        val v3 = upgradeAttempts(v2)
+        val attempts = historyJson.parseToJsonElement(v3).jsonArray.map { it.jsonObject }
+        assertEquals("bad_key", attempts[0]["failure"]!!.jsonPrimitive.content)
+        assertEquals(listOf("at", "settled", "raw", "failure", "failureDetail"), attempts[0].keys.toList())
+        assertEquals(v3, upgradeAttempts(v3))
+        // A token, or a reason this build doesn't know, is left as it is.
+        val newer = """[{"at":1,"failure":"quota"}]"""
+        assertEquals(newer, upgradeAttempts(newer))
+    }
+
+    @Test
+    fun languagesAreKeptByCodeAndOldNamesStillRead() {
+        assertEquals(listOf("ca", "es"), Language.all.map { it.code })
+        assertEquals(Language.Catalan, Language.read("ca"))
+        assertEquals(Language.Spanish, Language.read("Spanish"))
+        assertNull(Language.read("Klingon"))
+        assertNull(Language.read(null))
+        assertNull(Language.forCode("Catalan"))
     }
 
     @Test
     fun unknownTokensReadLeniently() {
-        assertNull(Stored.decision.decode("postponed"))
-        assertNull(Stored.decision.decode(null))
+        assertNull(Decision.tokens.decode("postponed"))
+        assertNull(Decision.tokens.decode(null))
         // Settings written by earlier builds hold constant names.
-        assertEquals(Judgments.FixOnly, Stored.judgments.decodeOrName("FixOnly"))
-        assertNull(Stored.judgments.decodeOrName("Everything"))
+        assertEquals(Judgments.FixOnly, Judgments.tokens.decodeOrName("FixOnly"))
+        assertNull(Judgments.tokens.decodeOrName("Everything"))
 
         val newer = session.values() + mapOf("origin" to "widget", "outcome" to "snoozed", "status" to "maybe", "attempts" to "not json")
         val read = sessionRecord(MapRow(newer))
@@ -145,11 +193,11 @@ class HistorySchemaTest {
     fun theReuseKeyBindsInOrder() {
         val key = session.reuseKey
         assertEquals(
-            listOf("abc123", "Catalan", "English", "moderate", "both", "gemini", "gemini-x", "p1", "5"),
+            listOf("abc123", "ca", "English", "moderate", "both", "gemini", "gemini-x", "p1", "5"),
             HistorySchema.reusableArgs(key, 5),
         )
         assertEquals(8, HistorySchema.reusableArgs(key.copy(requestedLanguage = null), 5).size)
-        assertEquals(7, HistorySchema.reusableArgs(key.copy(requestedLanguage = null, nativeLanguage = null), 5).size)
+        assertEquals(7, HistorySchema.reusableArgs(key.copy(requestedLanguage = null, settings = key.settings.copy(nativeLanguage = null)), 5).size)
     }
 
     @Test
@@ -229,7 +277,7 @@ class HistorySchemaTest {
         assertTrue(HistorySchema.reusable(key.copy(requestedLanguage = null)).contains("\"requestedLanguage\" IS NULL"))
         assertTrue(HistorySchema.reusable(key).contains("\"requestedLanguage\" = ?"))
         assertTrue(HistorySchema.reusable(key).contains("\"nativeLanguage\" = ?"))
-        assertTrue(HistorySchema.reusable(key.copy(nativeLanguage = null)).contains("\"nativeLanguage\" IS NULL"))
+        assertTrue(HistorySchema.reusable(key.copy(settings = key.settings.copy(nativeLanguage = null))).contains("\"nativeLanguage\" IS NULL"))
     }
 
     @Test

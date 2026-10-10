@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -21,18 +20,17 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
 import com.evanaronson.linguize.App
 import com.evanaronson.linguize.R
+import com.evanaronson.linguize.core.Language
 import com.evanaronson.linguize.core.Selection
-import com.evanaronson.linguize.data.MenuEntry
 import com.evanaronson.linguize.history.Origin
 import com.evanaronson.linguize.ui.card.CardActions
-import com.evanaronson.linguize.ui.card.CardState
 import com.evanaronson.linguize.ui.card.CheckViewModel
 import com.evanaronson.linguize.ui.card.FloatingCard
 import com.evanaronson.linguize.ui.components.LanguagePicker
 import com.evanaronson.linguize.ui.copyToClipboard
 import com.evanaronson.linguize.ui.home.HomeActivity
+import com.evanaronson.linguize.ui.home.SettingsReturn
 import com.evanaronson.linguize.ui.theme.AppTheme
-import kotlinx.coroutines.flow.drop
 
 /**
  * Checks text in apps whose selection menu doesn't show Linguize, such as
@@ -64,7 +62,8 @@ class LinguizeAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
-        card?.let { it.window.remove() }
+        // Closed as nothing applied, and no longer waiting for Settings.
+        card?.discard()
         card = null
         super.onDestroy()
     }
@@ -93,19 +92,31 @@ class LinguizeAccessibilityService : AccessibilityService() {
             return
         }
 
-        val app = application as App
         // Back closes the card as a tap outside it does; [close] is set just below.
         var onBack: () -> Unit = {}
         val window = OverlayWindow(this, onBack = { onBack() })
-        val check = ViewModelProvider(window, ViewModelProvider.AndroidViewModelFactory.getInstance(app))[CheckViewModel::class.java]
-        var entry by mutableStateOf(MenuEntry.Auto)
-        check.check(selection.text, entry.language, Origin.Button, field.packageName?.toString())
+        val check = ViewModelProvider(window, CheckViewModel.factory(App.of(this)))[CheckViewModel::class.java]
+        var language by mutableStateOf<Language?>(null)
+        check.check(selection.text, language, Origin.Button, field.packageName?.toString())
+
+        // Settings opens with the card hidden behind it (an overlay would cover it). Leaving
+        // settings brings the card back, checked again if it failed or the settings changed.
+        val backFromSettings: () -> Unit = {
+            window.hidden = false
+            check.recheckIfStale()
+        }
+        val openSettings: () -> Unit = {
+            SettingsReturn.await(backFromSettings)
+            window.hidden = true
+            startActivity(HomeActivity.settingsIntent(this))
+        }
 
         var closed = false
         // Ends this card, once: Back can arrive both as a key and as a back callback.
         fun end(applied: () -> Boolean) {
             if (closed) return
             closed = true
+            SettingsReturn.cancel(backFromSettings)
             check.dismiss(applied = applied())
             window.remove()
             if (card?.window === window) card = null
@@ -117,36 +128,16 @@ class LinguizeAccessibilityService : AccessibilityService() {
         }
         onBack = close
 
-        // Settings opens with the card hidden behind it (an overlay would cover it). Leaving
-        // settings brings the card back, checked again if it failed or the settings changed.
-        var settingsBefore: String? = null
-        val openSettings: () -> Unit = {
-            settingsBefore = app.settings.snapshot
-            window.hidden = true
-            startActivity(HomeActivity.settingsIntent(this))
-        }
-        val backFromSettings: () -> Unit = {
-            val before = settingsBefore
-            if (before != null) {
-                settingsBefore = null
-                window.hidden = false
-                if (app.settings.snapshot != before || check.state is CardState.Failed) check.recheck()
-            }
-        }
-
         val actions = CardActions.of(check, context = this, onClose = close, onOpenSettings = openSettings)
         window.show {
             AppTheme {
-                LaunchedEffect(Unit) {
-                    app.settingsLeft.drop(1).collect { backFromSettings() }
-                }
                 check.state?.let { state ->
                     // At the top, clear of the keyboard that's open for the field.
                     FloatingCard(state, actions, onDismiss = close, alignment = Alignment.TopCenter, topPadding = 32.dp) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            LanguagePicker(entry, onSelect = {
-                                entry = it
-                                check.check(selection.text, it.language, Origin.Button, field.packageName?.toString())
+                            LanguagePicker(language, onSelect = {
+                                language = it
+                                check.check(selection.text, it, Origin.Button, field.packageName?.toString())
                             })
                             FilledTonalIconButton(onClick = openSettings) {
                                 Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")

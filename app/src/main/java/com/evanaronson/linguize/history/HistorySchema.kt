@@ -1,20 +1,26 @@
 package com.evanaronson.linguize.history
 
+import com.evanaronson.linguize.codec.Tokens
 import com.evanaronson.linguize.core.EditKind
+import com.evanaronson.linguize.core.Judgments
+import com.evanaronson.linguize.core.Language
+import com.evanaronson.linguize.core.Punctuation
+import com.evanaronson.linguize.core.Verdict
 
 /*
  * The SQLite shape of history, and the mapping between rows and records. Pure Kotlin
  * with no Android in it, so the mapping is unit-tested; SqliteHistoryStore runs it.
  *
  * Columns are named exactly like the fields of the records, so a row in a SQLite browser
- * reads like the JSON it exports as. Enums are stored as their [Stored] tokens and read
+ * reads like the JSON it exports as. Enums are stored as their tokens ([Tokens]) and read
  * leniently. `attempts` is JSON (it's kept for re-deriving things later, never queried);
  * everything else is a real column. Identifiers are always double-quoted because `end` is
  * an SQL keyword.
  *
  * Versions: 1 was the first history build (enums stored by constant name, no `status`
  * at first, an attempt's answer under `verdict`); 2 adds `nativeLanguage` and stores
- * tokens and `raw`. [upgrade] says how to get from each older version to this one.
+ * tokens and `raw`; 3 stores the requested language as a code and an attempt's failure
+ * as a token. [upgrade] says how to get from each older version to this one.
  */
 internal object HistorySchema {
     const val NAME = "history.db"
@@ -23,7 +29,7 @@ internal object HistorySchema {
      * The database's version, for SQLiteOpenHelper. Separate from [SessionRecord.SCHEMA],
      * which is the shape of a row as it would travel to a server.
      */
-    const val VERSION = 2
+    const val VERSION = 3
 
     const val SESSIONS = "sessions"
     const val SUGGESTIONS = "suggestions"
@@ -120,7 +126,7 @@ internal object HistorySchema {
     fun markAbandoned(keep: Int): String {
         val kept = if (keep == 0) "" else """ AND "id" NOT IN (${List(keep) { "?" }.joinToString()})"""
         return """
-        UPDATE $SESSIONS SET "closedAt" = ?, "updatedAt" = ?, "outcome" = '${Stored.outcome.encode(Outcome.Abandoned)}'
+        UPDATE $SESSIONS SET "closedAt" = ?, "updatedAt" = ?, "outcome" = '${Outcome.Abandoned.token}'
         WHERE "closedAt" IS NULL$kept
         """.trimIndent()
     }
@@ -154,10 +160,10 @@ internal object HistorySchema {
         ORDER BY s."startedAt" DESC
     """.trimIndent()
 
-    private val FIX = Stored.editKind.encode(EditKind.Fix)
-    private val NATURAL = Stored.editKind.encode(EditKind.Natural)
-    private val ACCEPTED = Stored.decision.encode(Decision.Accepted)
-    private val SUPERSEDED = Stored.decision.encode(Decision.Superseded)
+    private val FIX = EditKind.Fix.token
+    private val NATURAL = EditKind.Natural.token
+    private val ACCEPTED = Decision.Accepted.token
+    private val SUPERSEDED = Decision.Superseded.token
 
     const val SESSION = """SELECT * FROM $SESSIONS WHERE "id" = ? AND "deletedAt" IS NULL"""
 
@@ -176,19 +182,19 @@ internal object HistorySchema {
         return """
         SELECT * FROM $SESSIONS
         WHERE "textHash" = ?
-            AND ${same("requestedLanguage", key.requestedLanguage)} AND ${same("nativeLanguage", key.nativeLanguage)}
+            AND ${same("requestedLanguage", key.requestedLanguage)} AND ${same("nativeLanguage", key.settings.nativeLanguage)}
             AND "punctuation" = ? AND "judgments" = ? AND "provider" = ? AND "model" = ? AND "promptHash" = ?
             AND "startedAt" >= ?
-            AND "closedAt" IS NOT NULL AND "deletedAt" IS NULL AND "outcome" != '${Stored.outcome.encode(Outcome.Failed)}'
+            AND "closedAt" IS NOT NULL AND "deletedAt" IS NULL AND "outcome" != '${Outcome.Failed.token}'
         ORDER BY "startedAt" DESC
         LIMIT 20
         """.trimIndent()
     }
 
     /** The values [reusable] binds, in order. */
-    fun reusableArgs(key: ReuseKey, since: Long): List<String> =
-        listOfNotNull(key.textHash, key.requestedLanguage, key.nativeLanguage, key.punctuation, key.judgments, key.provider, key.model, key.promptHash) +
-            since.toString()
+    fun reusableArgs(key: ReuseKey, since: Long): List<String> = with(key.settings) {
+        listOfNotNull(key.textHash, key.requestedLanguage, nativeLanguage, punctuation, judgments, provider, model, promptHash) + since.toString()
+    }
 
     const val DELETE_SESSION = """DELETE FROM $SESSIONS WHERE "id" = ?"""
 
@@ -211,31 +217,41 @@ internal object HistorySchema {
      * Version 1 came in two shapes: the first builds had no `status` column, and builds
      * from the token change on added it without changing the version. Both had enums by
      * constant name ("Accepted", "Gemini"), which become tokens here, so the counts in
-     * Recent and the reuse lookup, which compare tokens, see every row.
+     * Recent and the reuse lookup, which compare tokens, see every row. Versions 1 and 2
+     * kept the requested language by its English name, which becomes its code.
      */
     fun upgrade(from: Int, sessionColumns: Set<String>): List<String>? {
-        if (from != 1) return null
+        if (from !in 1 until VERSION) return null
         return buildList {
-            if ("status" !in sessionColumns) add("""ALTER TABLE $SESSIONS ADD COLUMN "status" TEXT""")
-            if ("nativeLanguage" !in sessionColumns) add("""ALTER TABLE $SESSIONS ADD COLUMN "nativeLanguage" TEXT""")
-            add(renaming(SESSIONS, "origin", Stored.origin))
-            add(renaming(SESSIONS, "outcome", Stored.outcome))
-            add(renaming(SESSIONS, "status", Stored.status))
-            add(renaming(SESSIONS, "punctuation", Stored.punctuation))
-            add(renaming(SESSIONS, "judgments", Stored.judgments))
-            add(renaming(SESSIONS, "provider", Stored.provider))
-            add(renaming(SUGGESTIONS, "kind", Stored.editKind))
-            add(renaming(SUGGESTIONS, "decision", Stored.decision))
+            if (from == 1) {
+                if ("status" !in sessionColumns) add("""ALTER TABLE $SESSIONS ADD COLUMN "status" TEXT""")
+                if ("nativeLanguage" !in sessionColumns) add("""ALTER TABLE $SESSIONS ADD COLUMN "nativeLanguage" TEXT""")
+                add(renaming(SESSIONS, "origin", Origin.tokens.renames()))
+                add(renaming(SESSIONS, "outcome", Outcome.tokens.renames()))
+                add(renaming(SESSIONS, "status", Verdict.Status.tokens.renames()))
+                add(renaming(SESSIONS, "punctuation", Punctuation.tokens.renames()))
+                add(renaming(SESSIONS, "judgments", Judgments.tokens.renames()))
+                add(renaming(SESSIONS, "provider", VERSION_1_PROVIDERS))
+                add(renaming(SUGGESTIONS, "kind", EditKind.tokens.renames()))
+                add(renaming(SUGGESTIONS, "decision", Decision.tokens.renames()))
+            }
+            add(renaming(SESSIONS, "requestedLanguage", Language.all.associate { it.name to it.code }))
             // Rows now have this build's shape.
             add("""UPDATE $SESSIONS SET "schema" = ${SessionRecord.SCHEMA}""")
             add("""UPDATE $SUGGESTIONS SET "schema" = ${SessionRecord.SCHEMA}""")
         }
     }
 
-    /** Rewrites [column] from constant names to [tokens]; anything else is left as it is. */
-    private fun renaming(table: String, column: String, tokens: Tokens<*>): String {
-        val renames = tokens.renames()
-        val cases = renames.entries.joinToString(" ") { (name, token) -> "WHEN '$name' THEN '$token'" }
+    /**
+     * The providers version 1 stored, by constant name, with their tokens. Spelled out
+     * rather than read from `Provider`, which history doesn't depend on; version 1 is done,
+     * so this never grows. A test holds it to `Provider`'s tokens.
+     */
+    val VERSION_1_PROVIDERS = mapOf("Gemini" to "gemini", "OpenAI" to "openai")
+
+    /** Rewrites [column] by [renames] (from old value to new); anything else is left as it is. */
+    private fun renaming(table: String, column: String, renames: Map<String, String>): String {
+        val cases = renames.entries.joinToString(" ") { (from, to) -> "WHEN '$from' THEN '$to'" }
         val names = renames.keys.joinToString { "'$it'" }
         return """UPDATE $table SET "$column" = CASE "$column" $cases END WHERE "$column" IN ($names)"""
     }
@@ -271,14 +287,14 @@ internal fun SessionRecord.values(): Map<String, Any?> = linkedMapOf(
     "deletedAt" to deletedAt,
     "startedAt" to startedAt,
     "closedAt" to closedAt,
-    "origin" to origin?.let(Stored.origin::encode),
+    "origin" to origin?.let(Origin::token),
     "hostApp" to hostApp,
     "requestedLanguage" to requestedLanguage,
     "nativeLanguage" to nativeLanguage,
     "text" to text,
     "textHash" to textHash,
     "finalText" to finalText,
-    "outcome" to outcome?.let(Stored.outcome::encode),
+    "outcome" to outcome?.let(Outcome::token),
     "punctuation" to punctuation,
     "judgments" to judgments,
     "provider" to provider,
@@ -287,7 +303,7 @@ internal fun SessionRecord.values(): Map<String, Any?> = linkedMapOf(
     "appVersion" to appVersion,
     "attempts" to encodeAttempts(attempts),
     "meaning" to meaning,
-    "status" to status?.let(Stored.status::encode),
+    "status" to status?.let(Verdict.Status::token),
 )
 
 /** The values to bind for [HistorySchema.SUGGESTION_COLUMNS], by column. */
@@ -300,13 +316,13 @@ internal fun SuggestionRecord.values(): Map<String, Any?> = linkedMapOf(
     "updatedAt" to updatedAt,
     "deletedAt" to deletedAt,
     "attempt" to attempt,
-    "kind" to Stored.editKind.encode(kind),
+    "kind" to kind.token,
     "start" to start,
     "end" to end,
     "fromText" to fromText,
     "toText" to toText,
     "why" to why,
-    "decision" to Stored.decision.encode(decision),
+    "decision" to decision.token,
     "decidedAt" to decidedAt,
 )
 
@@ -324,14 +340,14 @@ internal fun sessionRecord(row: Row) = SessionRecord(
     deletedAt = row.longOrNull("deletedAt"),
     startedAt = row.long("startedAt"),
     closedAt = row.longOrNull("closedAt"),
-    origin = Stored.origin.decode(row.string("origin")),
+    origin = Origin.tokens.decode(row.string("origin")),
     hostApp = row.stringOrNull("hostApp"),
     requestedLanguage = row.stringOrNull("requestedLanguage"),
     nativeLanguage = row.stringOrNull("nativeLanguage"),
     text = row.string("text"),
     textHash = row.string("textHash"),
     finalText = row.stringOrNull("finalText"),
-    outcome = Stored.outcome.decode(row.stringOrNull("outcome")),
+    outcome = Outcome.tokens.decode(row.stringOrNull("outcome")),
     punctuation = row.string("punctuation"),
     judgments = row.string("judgments"),
     provider = row.string("provider"),
@@ -340,7 +356,7 @@ internal fun sessionRecord(row: Row) = SessionRecord(
     appVersion = row.string("appVersion"),
     attempts = decodeAttempts(row.string("attempts")),
     meaning = row.stringOrNull("meaning"),
-    status = Stored.status.decode(row.stringOrNull("status")),
+    status = Verdict.Status.tokens.decode(row.stringOrNull("status")),
 )
 
 /**
@@ -348,8 +364,8 @@ internal fun sessionRecord(row: Row) = SessionRecord(
  * doesn't know: a suggestion can't be shown or counted without them.
  */
 internal fun suggestionRecord(row: Row): SuggestionRecord? {
-    val kind = Stored.editKind.decode(row.string("kind")) ?: return null
-    val decision = Stored.decision.decode(row.string("decision")) ?: return null
+    val kind = EditKind.tokens.decode(row.string("kind")) ?: return null
+    val decision = Decision.tokens.decode(row.string("decision")) ?: return null
     return SuggestionRecord(
         id = row.string("id"),
         sessionId = row.string("sessionId"),
@@ -374,14 +390,14 @@ internal fun suggestionRecord(row: Row): SuggestionRecord? {
 internal fun sessionSummary(row: Row) = SessionSummary(
     id = row.string("id"),
     startedAt = row.long("startedAt"),
-    origin = Stored.origin.decode(row.string("origin")),
+    origin = Origin.tokens.decode(row.string("origin")),
     hostApp = row.stringOrNull("hostApp"),
     text = row.string("text"),
-    outcome = Stored.outcome.decode(row.stringOrNull("outcome")),
+    outcome = Outcome.tokens.decode(row.stringOrNull("outcome")),
     fixes = row.long("fixes").toInt(),
     rewordings = row.long("rewordings").toInt(),
     taken = row.long("taken").toInt(),
-    status = Stored.status.decode(row.stringOrNull("status")),
+    status = Verdict.Status.tokens.decode(row.stringOrNull("status")),
 )
 
 /** Whether a session's answer can be shown again: its last attempt came back with one. */

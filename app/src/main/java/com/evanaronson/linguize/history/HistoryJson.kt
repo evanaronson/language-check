@@ -34,9 +34,10 @@ internal fun decodeAttempts(stored: String): List<Attempt> = try {
 }
 
 /**
- * The `attempts` column of a version-1 row in this version's shape: an attempt's answer
- * moves from `verdict` to `raw`. Anything else, and a column that can't be read, is left
- * as it is.
+ * The `attempts` column of an older row in this version's shape: an attempt's answer moves
+ * from `verdict` to `raw` (version 1), and its failure goes from the reason's constant name
+ * to its token (versions 1 and 2, see [LEGACY_FAILURES]). Anything else, and a column that
+ * can't be read, is left as it is.
  */
 internal fun upgradeAttempts(stored: String): String {
     val attempts = try {
@@ -44,12 +45,42 @@ internal fun upgradeAttempts(stored: String): String {
     } catch (_: SerializationException) {
         return stored
     }
-    val upgraded = attempts.map { attempt ->
-        if (attempt !is JsonObject || "verdict" !in attempt || "raw" in attempt) return@map attempt
-        JsonObject(attempt.entries.associate { (key, value) -> (if (key == "verdict") "raw" else key) to value })
-    }
+    val upgraded = attempts.map { attempt -> if (attempt is JsonObject) upgradeAttempt(attempt) else attempt }
     return if (upgraded == attempts) stored else JsonArray(upgraded).toString()
 }
+
+private fun upgradeAttempt(attempt: JsonObject): JsonObject {
+    val failure = (attempt["failure"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    val token = LEGACY_FAILURES[failure]
+    if (token == null && ("verdict" !in attempt || "raw" in attempt)) return attempt
+    return JsonObject(
+        attempt.entries.associate { (key, value) ->
+            when {
+                key == "verdict" && "raw" !in attempt -> "raw" to value
+                key == "failure" && token != null -> "failure" to JsonPrimitive(token)
+                else -> key to value
+            }
+        },
+    )
+}
+
+/**
+ * The failure reasons versions 1 and 2 kept, by constant name, with their tokens. Spelled
+ * out rather than read from `CheckFailure.Reason`, which history doesn't depend on; those
+ * versions are done, so this never grows. A test holds it to the reasons' tokens.
+ */
+internal val LEGACY_FAILURES = mapOf(
+    "NoKey" to "no_key",
+    "BadKey" to "bad_key",
+    "BadModel" to "bad_model",
+    "Offline" to "offline",
+    "Timeout" to "timeout",
+    "RateLimited" to "rate_limited",
+    "Server" to "server",
+    "BadResponse" to "bad_response",
+    "TooLong" to "too_long",
+    "TooMany" to "too_many",
+)
 
 /**
  * A row as JSON, column by column, exactly as it's stored: numbers as numbers, text as

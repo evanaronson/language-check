@@ -39,7 +39,7 @@ class SqliteHistoryStoreTest {
         updatedAt = startedAt,
         startedAt = startedAt,
         origin = Origin.Menu,
-        requestedLanguage = "Catalan",
+        requestedLanguage = "ca",
         nativeLanguage = "English",
         text = text,
         textHash = SessionRecording.hash(text),
@@ -182,10 +182,10 @@ class SqliteHistoryStoreTest {
         assertEquals("s1", store.reusable(done.reuseKey, since = 4_000)?.session?.id)
         // Too old, other settings, other text, other language.
         assertNull(store.reusable(done.reuseKey, since = 5_001))
-        assertNull(store.reusable(done.reuseKey.copy(model = "other"), since = 4_000))
+        assertNull(store.reusable(done.reuseKey.let { it.copy(settings = it.settings.copy(model = "other")) }, since = 4_000))
         assertNull(store.reusable(done.reuseKey.copy(textHash = "other"), since = 4_000))
         assertNull(store.reusable(done.reuseKey.copy(requestedLanguage = null), since = 4_000))
-        assertNull(store.reusable(done.reuseKey.copy(nativeLanguage = "Spanish"), since = 4_000))
+        assertNull(store.reusable(done.reuseKey.let { it.copy(settings = it.settings.copy(nativeLanguage = "Spanish")) }, since = 4_000))
 
         // Auto-detect matches auto-detect.
         val auto = open("s2", 5_000, model = "auto").copy(requestedLanguage = null).answered(5_500).closed(6_000)
@@ -240,6 +240,7 @@ class SqliteHistoryStoreTest {
         assertEquals("moderate", session.punctuation)
         assertEquals("fix", session.judgments)
         assertEquals("gemini", session.provider)
+        assertEquals("ca", session.requestedLanguage)
         assertEquals(SessionRecord.SCHEMA, session.schema)
         assertNull(session.nativeLanguage)
         assertEquals("""{"status":"ok"}""", session.attempts.single().raw)
@@ -268,6 +269,29 @@ class SqliteHistoryStoreTest {
         legacyDatabase(withStatus = true)
         assertEquals(Verdict.Status.Ok, store.detail("old")!!.session.status)
         assertEquals(1, store.recent(10).first().single().taken)
+    }
+
+    @Test
+    fun aVersion2DatabaseKeepsLanguageCodesAndFailureTokens() = runBlocking<Unit> {
+        // Version 2 had this version's tables, with the language by name and failures by constant name.
+        SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(NAME), null).use { db ->
+            HistorySchema.CREATE.forEach(db::execSQL)
+            val attempts = """[{"at":1500,"settled":[],"raw":null,"failure":"RateLimited","failureDetail":"slow down"}]"""
+            db.execSQL(
+                """INSERT INTO sessions ("id","deviceId","schema","createdAt","updatedAt","startedAt","closedAt","origin",
+                "requestedLanguage","nativeLanguage","text","textHash","outcome","punctuation","judgments","provider","model",
+                "promptHash","appVersion","attempts")
+                VALUES ('v2','device',2,1000,2000,1000,2000,'menu','Spanish','English','Hola','h','failed','moderate','both',
+                'openai','m','p1','0.2',?)""",
+                arrayOf(attempts),
+            )
+            db.version = 2
+        }
+        val session = store.detail("v2")!!.session
+        assertEquals("es", session.requestedLanguage)
+        assertEquals("rate_limited", session.attempts.single().failure)
+        assertEquals("slow down", session.attempts.single().failureDetail)
+        assertEquals(SessionRecord.SCHEMA, session.schema)
     }
 
     @Test

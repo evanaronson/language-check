@@ -10,35 +10,28 @@ import kotlinx.serialization.json.putJsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.ConcurrentHashMap
 
 /** OpenAI's Responses API over plain REST. */
 class OpenAIClient(private val http: OkHttpClient, private val prompt: Prompt) : ProviderClient {
     /** Strict structured output rejects Gemini's non-standard propertyOrdering. */
     private val schema = JsonObject(prompt.schema - "propertyOrdering")
 
-    /** Models that rejected reasoning effort "none"; they get their default instead. */
-    private val noReasoningControl = ConcurrentHashMap.newKeySet<String>()
+    /** Reasoning effort "none"; models that reject it get their default instead. */
+    private val reasoningNone = DroppableOption(refusal = "reasoning")
 
     override suspend fun check(key: String, model: String, request: CheckRequest): ModelAnswer {
         // One time limit for the whole check, the retry without reasoning control included.
         val deadline = Deadline(http)
-        var noReasoning = model !in noReasoningControl
-        while (true) {
+        val (code, payload) = reasoningNone.send(model) { withoutReasoning ->
             val call = Request.Builder()
                 .url("$BASE/responses")
                 .header("Authorization", "Bearer $key")
-                .post(body(model, request, noReasoning).toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body(model, request, withoutReasoning).toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
-            val (code, payload) = deadline.send(call)
-            if (code == 400 && noReasoning && "reasoning" in payload.lowercase()) {
-                noReasoningControl += model
-                noReasoning = false
-                continue
-            }
-            if (code != 200) throw failure(code, payload)
-            return prompt.read(answer(payload))
+            deadline.send(call)
         }
+        if (code != 200) throw failure(code, payload)
+        return prompt.read(answer(payload))
     }
 
     override suspend fun models(key: String): List<String> {

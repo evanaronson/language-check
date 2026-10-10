@@ -7,17 +7,9 @@ import com.evanaronson.linguize.core.Settled
 import com.evanaronson.linguize.core.Verdict
 import java.security.MessageDigest
 
-/** Facts about a session known when it starts. Settings are [Stored] tokens. */
+/** Facts about a session known when it starts: how its check runs, and about this install. */
 data class SessionContext(
-    val origin: Origin,
-    val hostApp: String?,
-    val requestedLanguage: String?,
-    val nativeLanguage: String?,
-    val punctuation: String,
-    val judgments: String,
-    val provider: String,
-    val model: String,
-    val promptHash: String,
+    val opening: Opening,
     val appVersion: String,
     val deviceId: String,
 )
@@ -74,23 +66,25 @@ class SessionRecording(
     private var closed: SessionDetail? = null
 
     init {
+        val opening = context.opening
+        val settings = opening.settings
         session = SessionRecord(
             id = newId(),
             deviceId = context.deviceId,
             createdAt = now,
             updatedAt = now,
             startedAt = now,
-            origin = context.origin,
-            hostApp = context.hostApp,
-            requestedLanguage = context.requestedLanguage,
-            nativeLanguage = context.nativeLanguage,
+            origin = opening.origin,
+            hostApp = opening.hostApp,
+            requestedLanguage = opening.requestedLanguage,
+            nativeLanguage = settings.nativeLanguage,
             text = text,
             textHash = hash(text),
-            punctuation = context.punctuation,
-            judgments = context.judgments,
-            provider = context.provider,
-            model = context.model,
-            promptHash = context.promptHash,
+            punctuation = settings.punctuation,
+            judgments = settings.judgments,
+            provider = settings.provider,
+            model = settings.model,
+            promptHash = settings.promptHash,
             appVersion = context.appVersion,
         )
     }

@@ -45,7 +45,7 @@ import java.time.ZoneId
  */
 @Composable
 fun SessionScreen(session: SessionViewModel, onBack: () -> Unit) {
-    val app = LocalContext.current.applicationContext as App
+    val app = App.of(LocalContext.current)
     Column(
         Modifier
             .safeDrawingPadding()

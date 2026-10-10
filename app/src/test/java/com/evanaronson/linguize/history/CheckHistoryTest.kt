@@ -2,12 +2,9 @@ package com.evanaronson.linguize.history
 
 import com.evanaronson.linguize.core.CheckResult
 import com.evanaronson.linguize.core.EditKind
-import com.evanaronson.linguize.core.Judgments
-import com.evanaronson.linguize.core.Punctuation
 import com.evanaronson.linguize.core.Settled
 import com.evanaronson.linguize.core.Verdict
 import com.evanaronson.linguize.core.interpret
-import com.evanaronson.linguize.llm.Provider
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,17 +36,16 @@ class CheckHistoryTest {
     )
     private val result = interpret(rain, verdict) as CheckResult.Reviewed
 
-    private val opening = Opening(
-        origin = Origin.Menu,
-        hostApp = "org.telegram.messenger",
-        requestedLanguage = "Catalan",
+    private val settings = SessionSettings(
         nativeLanguage = "English",
-        punctuation = Punctuation.Moderate,
-        judgments = Judgments.FixOnly,
-        provider = Provider.OpenAI,
+        punctuation = "moderate",
+        judgments = "fix",
+        provider = "openai",
         model = "a-model",
         promptHash = "p1",
     )
+
+    private val opening = Opening(origin = Origin.Menu, hostApp = "org.telegram.messenger", requestedLanguage = "ca", settings = settings)
 
     private val store = FakeStore()
     private val environment = object : HistoryEnvironment {
@@ -198,9 +194,9 @@ class CheckHistoryTest {
         // The lookup asked for the same text and settings, from the last ten minutes.
         val (key, since) = store.lookedUp.single()
         assertEquals(SessionRecording.hash(rain), key.textHash)
-        assertEquals("Catalan", key.requestedLanguage)
-        assertEquals("English", key.nativeLanguage)
-        assertEquals("fix", key.judgments)
+        assertEquals("ca", key.requestedLanguage)
+        assertEquals("English", key.settings.nativeLanguage)
+        assertEquals("fix", key.settings.judgments)
         assertEquals(1_000 - CheckHistory.REUSE_WITHIN_MS, since)
 
         history.succeeded(answer.reused!!.settled, answer.reused!!.raw, result, reusedFrom = answer.reused!!.sessionId)
@@ -285,7 +281,7 @@ class CheckHistoryTest {
         assertEquals(first.id, history.session?.id)
 
         now = 1_500
-        history.recheck(rain, opening.copy(model = "another-model"))
+        history.recheck(rain, opening.copy(settings = settings.copy(model = "another-model")))
         val second = history.session!!
         assertTrue(second.id != first.id)
         assertEquals("another-model", second.model)
@@ -308,7 +304,7 @@ class CheckHistoryTest {
         environment.enabled = false
         history.open(rain, opening)
         environment.enabled = true
-        history.recheck(rain, opening.copy(model = "another-model"))
+        history.recheck(rain, opening.copy(settings = settings.copy(model = "another-model")))
         history.flush()
         assertNull(history.session)
         assertTrue(store.calls.isEmpty())
@@ -349,9 +345,7 @@ class CheckHistoryTest {
         assertEquals(Verdict.Status.WrongLanguage, CheckHistory.statusOf(CheckResult.WrongLanguage("Catalan", "Spanish")))
     }
 
-    private val keptContext = SessionContext(
-        Origin.Menu, null, "Catalan", "English", "moderate", "fix", "openai", "a-model", "p1", "1.0", "device",
-    )
+    private val keptContext = SessionContext(opening.copy(hostApp = null), "1.0", "device")
 
     private fun keptSession(id: String, raw: String) = SessionRecording(rain, keptContext, 500, newId = { id }).also {
         it.attempt(600, listOf(Settled("tu", "informal")), raw, null, null, null, null)

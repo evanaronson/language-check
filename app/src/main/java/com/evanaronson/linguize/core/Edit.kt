@@ -1,7 +1,20 @@
 package com.evanaronson.linguize.core
 
+import com.evanaronson.linguize.codec.Tokens
+
 /** Which section of the card an edit belongs to. */
-enum class EditKind { Fix, Natural }
+enum class EditKind(
+    /** What history keeps. */
+    val token: String,
+) {
+    Fix("fix"),
+    Natural("natural"),
+    ;
+
+    companion object {
+        val tokens = Tokens(entries, EditKind::token)
+    }
+}
 
 /**
  * One suggested change, anchored to a span of the writer's original text, so

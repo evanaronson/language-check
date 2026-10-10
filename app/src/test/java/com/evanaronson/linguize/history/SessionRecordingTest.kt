@@ -15,15 +15,19 @@ import org.junit.Test
 /** What becomes of each suggestion and of the session, for each way a card can be used. */
 class SessionRecordingTest {
     private val context = SessionContext(
-        origin = Origin.Menu,
-        hostApp = "org.telegram.messenger",
-        requestedLanguage = "Catalan",
-        nativeLanguage = "English",
-        punctuation = "Relaxed",
-        judgments = "Both",
-        provider = "anthropic",
-        model = "a-model",
-        promptHash = "p1",
+        Opening(
+            origin = Origin.Menu,
+            hostApp = "org.telegram.messenger",
+            requestedLanguage = "ca",
+            settings = SessionSettings(
+                nativeLanguage = "English",
+                punctuation = "Relaxed",
+                judgments = "Both",
+                provider = "anthropic",
+                model = "a-model",
+                promptHash = "p1",
+            ),
+        ),
         appVersion = "1.0",
         deviceId = "device",
     )
@@ -76,7 +80,7 @@ class SessionRecordingTest {
         assertNull(session.closedAt)
         assertNull(session.outcome)
         assertEquals(Origin.Menu, session.origin)
-        assertEquals("Catalan", session.requestedLanguage)
+        assertEquals("ca", session.requestedLanguage)
         assertEquals(SessionRecording.hash(rain), session.textHash)
         assertTrue(session.attempts.isEmpty())
     }

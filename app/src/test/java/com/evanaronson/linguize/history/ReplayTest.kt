@@ -28,7 +28,9 @@ class ReplayTest {
     private val parse: (String) -> Verdict = { answers.getValue(it) }
 
     private val context = SessionContext(
-        Origin.Menu, null, "Catalan", "English", "moderate", "both", "gemini", "m", "p1", "1.0", "device",
+        Opening(Origin.Menu, null, "ca", SessionSettings("English", "moderate", "both", "gemini", "m", "p1")),
+        appVersion = "1.0",
+        deviceId = "device",
     )
 
     private fun revision() = (interpret(rain, verdict) as CheckResult.Reviewed).revision

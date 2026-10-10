@@ -1,9 +1,11 @@
 package com.evanaronson.linguize.ui.history
 
-import android.app.Application
 import android.content.Context
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.evanaronson.linguize.App
 import com.evanaronson.linguize.history.SessionSummary
 import com.evanaronson.linguize.ui.forgetExports
@@ -32,9 +34,8 @@ data class RecentRow(val summary: SessionSummary, val appLabel: String?)
  * The pending row is also noted on disk, so a process that ends during that moment
  * doesn't lose the deletion: the next Home deletes it.
  */
-class HistoryViewModel(application: Application) : AndroidViewModel(application) {
-    private val app = application as App
-    private val labels = AppLabels(application.packageManager)
+class HistoryViewModel(private val app: App) : ViewModel() {
+    private val labels = AppLabels(app.packageManager)
 
     /** Rows off the list: the one whose deletion can still be undone, and those deleted since. */
     private val hidden = MutableStateFlow<Set<String>>(emptySet())
@@ -44,7 +45,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     private var timer: Job? = null
 
     /** Where [pending] is noted, until it's deleted or undone. */
-    private val prefs by lazy { application.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+    private val prefs by lazy { app.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
 
     /** Newest first; null until the first read. */
     val recent: StateFlow<List<RecentRow>?> = combine(
@@ -138,14 +139,16 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private companion object {
-        const val LIMIT = 50
+    companion object {
+        fun factory(app: App): ViewModelProvider.Factory = viewModelFactory { initializer { HistoryViewModel(app) } }
+
+        private const val LIMIT = 50
 
         /** Recent's own preferences: only the pending deletion. */
-        const val PREFS = "recent"
-        const val PENDING_KEY = "pendingDelete"
+        private const val PREFS = "recent"
+        private const val PENDING_KEY = "pendingDelete"
 
         /** How long a deletion waits for Undo while no Undo is on screen; about a short snackbar's time. */
-        const val UNDO_MS = 4_000L
+        private const val UNDO_MS = 4_000L
     }
 }

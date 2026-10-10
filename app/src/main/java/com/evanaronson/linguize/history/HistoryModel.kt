@@ -1,5 +1,7 @@
 package com.evanaronson.linguize.history
 
+import com.evanaronson.linguize.codec.TokenSerializer
+import com.evanaronson.linguize.codec.Tokens
 import com.evanaronson.linguize.core.EditKind
 import com.evanaronson.linguize.core.Settled
 import com.evanaronson.linguize.core.Verdict
@@ -11,54 +13,73 @@ import kotlinx.serialization.Serializable
  * deletion and a schema version, so rows from several devices can merge on a server
  * without translation. See docs/history-spec.md.
  *
- * Enums are kept as the lowercase tokens in [Stored], the same in the database and the
- * export, and read leniently: see [Tokens]. The export is written from the rows
- * themselves, so a token this build doesn't know travels unchanged.
+ * Enums are kept as the lowercase tokens their constants spell out (`token`), the same
+ * in the database and the export, and read leniently: see [Tokens]. The export is
+ * written from the rows themselves, so a token this build doesn't know travels unchanged.
  */
 
 /** Where a check was started. */
 @Serializable(with = OriginSerializer::class)
-enum class Origin { Menu, Button, Tester }
+enum class Origin(val token: String) {
+    Menu("menu"),
+    Button("button"),
+    Tester("tester"),
+    ;
+
+    companion object {
+        val tokens = Tokens(entries, Origin::token)
+    }
+}
 
 /** What became of one suggestion by the time its card closed. */
 @Serializable(with = DecisionSerializer::class)
-enum class Decision {
+enum class Decision(val token: String) {
     /** Applied in the final text. */
-    Accepted,
+    Accepted("accepted"),
 
     /** Accepted at some point, not applied at the end. */
-    Undone,
+    Undone("undone"),
 
     /** A fix overtaken by an accepted rewording that includes it. */
-    Retired,
+    Retired("retired"),
 
     /** Still on offer when the writer copied its section's version. */
-    Copied,
+    Copied("copied"),
 
     /** Still on offer when the card closed. */
-    Ignored,
+    Ignored("ignored"),
 
     /** From an earlier attempt that a re-check replaced. */
-    Superseded,
+    Superseded("superseded"),
+    ;
+
+    companion object {
+        val tokens = Tokens(entries, Decision::token)
+    }
 }
 
 /** How a session ended. */
 @Serializable(with = OutcomeSerializer::class)
-enum class Outcome {
+enum class Outcome(val token: String) {
     /** Accepted changes went back to the app. */
-    Applied,
+    Applied("applied"),
 
     /** Nothing applied; a version was copied. */
-    Copied,
+    Copied("copied"),
 
     /** Closed with nothing applied or copied. */
-    None,
+    None("none"),
 
     /** The last attempt failed. */
-    Failed,
+    Failed("failed"),
 
     /** Never closed: the process ended with the card open. Set on the next start. */
-    Abandoned,
+    Abandoned("abandoned"),
+    ;
+
+    companion object {
+        val tokens = Tokens(entries, Outcome::token)
+    }
 }
 
 /** One time the card opened on a text, and everything that happened until it closed. */
@@ -77,7 +98,10 @@ data class SessionRecord(
     val origin: Origin?,
     /** Package name of the app the text came from; null when unknown or for the tester. */
     val hostApp: String? = null,
-    /** The language the writer asked for, by name; null for auto-detect. */
+    /**
+     * The language the writer asked for, as its ISO 639-1 code (`Language.code`); null for
+     * auto-detect.
+     */
     val requestedLanguage: String? = null,
     /**
      * The writer's own language, which the meaning and reasons were asked in; null for
@@ -92,7 +116,7 @@ data class SessionRecord(
     val finalText: String? = null,
     /** Null while open. */
     val outcome: Outcome? = null,
-    /** The settings in force, as [Stored] tokens: they change what gets suggested. */
+    /** The settings in force, as tokens: they change what gets suggested. See [settings]. */
     val punctuation: String,
     val judgments: String,
     val provider: String,
@@ -110,13 +134,20 @@ data class SessionRecord(
      */
     val status: Verdict.Status? = null,
 ) {
+    /** The settings this session's attempts ran with. */
+    val settings: SessionSettings
+        get() = SessionSettings(nativeLanguage, punctuation, judgments, provider, model, promptHash)
+
     /** What another check must match to show this one's verdict again. */
     val reuseKey: ReuseKey
-        get() = ReuseKey(textHash, requestedLanguage, nativeLanguage, punctuation, judgments, provider, model, promptHash)
+        get() = ReuseKey(textHash, requestedLanguage, settings)
 
     companion object {
-        /** 2: `nativeLanguage`; an attempt's answer is `raw`, the model's own text. */
-        const val SCHEMA = 2
+        /**
+         * 2: `nativeLanguage`; an attempt's answer is `raw`, the model's own text.
+         * 3: `requestedLanguage` is a language code, an attempt's `failure` a token.
+         */
+        const val SCHEMA = 3
     }
 }
 
@@ -132,7 +163,7 @@ data class Attempt(
      * Null when no answer came (offline, a refused key, a cut-off answer, ...).
      */
     val raw: String? = null,
-    /** `CheckFailure.Reason` name, when the attempt failed. */
+    /** Why the attempt failed, as the reason's token (`CheckFailure.Reason.token`); null when it didn't. */
     val failure: String? = null,
     val failureDetail: String? = null,
     /**
@@ -169,16 +200,28 @@ data class SuggestionRecord(
     val decidedAt: Long,
 )
 
-/** Everything a check must share with an earlier one for the earlier verdict to be shown again. */
-data class ReuseKey(
-    val textHash: String,
-    val requestedLanguage: String?,
+/**
+ * The settings a check runs with that change its answer, as a session keeps them: the
+ * options and provider as tokens, the writer's own language as the prompt names it.
+ * Every attempt of a session ran with the same ones.
+ */
+data class SessionSettings(
+    /** The writer's own language; null for sessions recorded before it was kept. */
     val nativeLanguage: String?,
     val punctuation: String,
     val judgments: String,
     val provider: String,
     val model: String,
+    /** Hash of the system prompt and schema. */
     val promptHash: String,
+)
+
+/** Everything a check must share with an earlier one for the earlier verdict to be shown again. */
+data class ReuseKey(
+    val textHash: String,
+    /** A language code, or null for auto-detect. */
+    val requestedLanguage: String?,
+    val settings: SessionSettings,
 )
 
 /** A row in the Recent list. */
@@ -219,3 +262,11 @@ data class SessionDetail(val session: SessionRecord, val suggestions: List<Sugge
         return decided?.takeIf { it in succeeded } ?: succeeded.lastOrNull()
     }
 }
+
+object OriginSerializer : TokenSerializer<Origin>("Origin", { Origin.tokens })
+
+object DecisionSerializer : TokenSerializer<Decision>("Decision", { Decision.tokens })
+
+object OutcomeSerializer : TokenSerializer<Outcome>("Outcome", { Outcome.tokens })
+
+object EditKindSerializer : TokenSerializer<EditKind>("EditKind", { EditKind.tokens })

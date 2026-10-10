@@ -9,7 +9,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import com.evanaronson.linguize.data.MenuEntry
+import com.evanaronson.linguize.core.Language
 import com.evanaronson.linguize.history.Origin
 import com.evanaronson.linguize.ui.card.CardActions
 import com.evanaronson.linguize.ui.card.CheckViewModel
@@ -37,11 +37,12 @@ internal fun TryIt(check: CheckViewModel, onOpenSettings: () -> Unit) {
         modifier = Modifier.fillMaxWidth(),
         minLines = 2,
     )
-    var entry by rememberSaveable { mutableStateOf(MenuEntry.Auto) }
+    // Saved as the language's code (null for auto-detect).
+    var code by rememberSaveable { mutableStateOf<String?>(null) }
     // Picking a language from the menu runs the check, as in the accessibility overlay.
-    LanguagePicker(entry, onSelect = {
-        entry = it
-        sample.trim().takeIf { text -> text.isNotEmpty() }?.let { text -> check.check(text, it.language, Origin.Tester) }
+    LanguagePicker(Language.forCode(code), onSelect = {
+        code = it?.code
+        sample.trim().takeIf { text -> text.isNotEmpty() }?.let { text -> check.check(text, it, Origin.Tester) }
     })
 
     check.state?.let { state ->

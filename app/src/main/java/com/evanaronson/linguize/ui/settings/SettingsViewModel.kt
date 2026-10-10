@@ -1,14 +1,16 @@
 package com.evanaronson.linguize.ui.settings
 
-import android.app.Application
 import android.net.Uri
 import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.FileProvider
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.evanaronson.linguize.App
 import com.evanaronson.linguize.core.Judgments
 import com.evanaronson.linguize.core.Punctuation
@@ -75,11 +77,10 @@ sealed interface ModelTest {
     data class Failed(val message: String) : ModelTest
 }
 
-class SettingsViewModel(application: Application) : AndroidViewModel(application) {
-    private val app = application as App
+class SettingsViewModel(private val app: App) : ViewModel() {
     private var modelsJob: Job? = null
     private var testJob: Job? = null
-    private val exports = Exports(application.cacheDir)
+    private val exports = Exports(app.cacheDir)
 
     /** Selection-menu writes, one at a time (see [toggleMenuEntry]). */
     private val menuWrites = Mutex()
@@ -296,11 +297,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         return update(current).also { state = it }
     }
 
-    private companion object {
+    companion object {
+        fun factory(app: App): ViewModelProvider.Factory = viewModelFactory { initializer { SettingsViewModel(app) } }
+
         /** How long a finished export may wait for settings to show again and offer it: a rotation, not a later visit. */
-        const val OFFER_WITHIN_MILLIS = 10_000L
+        private const val OFFER_WITHIN_MILLIS = 10_000L
 
         /** So the file is past [Exports.KEEP_MILLIS] when the delayed prune looks at it. */
-        const val PRUNE_SLACK_MILLIS = 1_000L
+        private const val PRUNE_SLACK_MILLIS = 1_000L
     }
 }

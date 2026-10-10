@@ -14,22 +14,25 @@ import javax.crypto.spec.GCMParameterSpec
 /**
  * Stores provider API keys in app-private preferences, encrypted with a key
  * held in the Android Keystore. Keys are entered on the settings screen and
- * never live in the code.
+ * never live in the code. Each is kept under its provider's token; one saved under the
+ * provider's name by an earlier build is moved there on first use.
  */
-class ApiKeys(context: Context) {
-    private val prefs = context.getSharedPreferences("keys", Context.MODE_PRIVATE)
+class ApiKeys(context: Context) : ProviderKeys {
+    private val prefs = context.getSharedPreferences("keys", Context.MODE_PRIVATE).apply {
+        moveProviderNamesToTokens { it }
+    }
 
     /** Decrypted keys; reads and writes are synchronized so a slow read can't bring back a removed key. */
     private val cache = mutableMapOf<Provider, String>()
 
     @Synchronized
-    fun get(provider: Provider): String? = cache[provider] ?: prefs.getString(provider.name, null)
+    override fun get(provider: Provider): String? = cache[provider] ?: prefs.getString(provider.token, null)
         ?.let { runCatching { decrypt(it) }.getOrNull() }
         ?.also { cache[provider] = it }
 
     /** What the settings screen shows about a provider's stored key. */
     fun status(provider: Provider): KeyStatus {
-        if (!prefs.contains(provider.name)) return KeyStatus.None
+        if (!prefs.contains(provider.token)) return KeyStatus.None
         val key = get(provider) ?: return KeyStatus.Unreadable
         return KeyStatus.Saved(key.takeLast(4))
     }
@@ -39,10 +42,10 @@ class ApiKeys(context: Context) {
     fun set(provider: Provider, value: String) {
         val key = value.trim()
         if (key.isEmpty()) {
-            prefs.edit().remove(provider.name).apply()
+            prefs.edit().remove(provider.token).apply()
             cache.remove(provider)
         } else {
-            prefs.edit().putString(provider.name, encrypt(key)).apply()
+            prefs.edit().putString(provider.token, encrypt(key)).apply()
             cache[provider] = key
         }
     }

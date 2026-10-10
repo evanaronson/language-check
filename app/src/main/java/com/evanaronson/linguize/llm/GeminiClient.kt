@@ -13,35 +13,28 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * The Gemini Developer API over plain REST. The official SDKs pull in Firebase
  * or Ktor plus Google auth; two endpoints don't need them.
  */
 class GeminiClient(private val http: OkHttpClient, private val prompt: Prompt) : ProviderClient {
-    /** Models that rejected the minimal thinking level; they get their default instead. */
-    private val noMinimalThinking = ConcurrentHashMap.newKeySet<String>()
+    /** Minimal thinking; models that reject it get their default instead. */
+    private val minimal = DroppableOption(refusal = "thinking")
 
     override suspend fun check(key: String, model: String, request: CheckRequest): ModelAnswer {
         // One time limit for the whole check, the retry without minimal thinking included.
         val deadline = Deadline(http)
-        var minimal = model !in noMinimalThinking
-        while (true) {
+        val (code, payload) = minimal.send(model) { withMinimal ->
             val call = Request.Builder()
                 .url("$BASE/models/$model:generateContent")
                 .header("x-goog-api-key", key)
-                .post(body(request, minimal).toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body(request, withMinimal).toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
-            val (code, payload) = deadline.send(call)
-            if (code == 400 && minimal && "thinking" in payload.lowercase()) {
-                noMinimalThinking += model
-                minimal = false
-                continue
-            }
-            if (code != 200) throw failure(code, payload)
-            return prompt.read(answer(payload))
+            deadline.send(call)
         }
+        if (code != 200) throw failure(code, payload)
+        return prompt.read(answer(payload))
     }
 
     override suspend fun models(key: String): List<String> {

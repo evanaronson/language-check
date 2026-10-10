@@ -1,12 +1,14 @@
 package com.evanaronson.linguize.ui.card
 
-import android.app.Application
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.evanaronson.linguize.App
 import com.evanaronson.linguize.CheckContext
 import com.evanaronson.linguize.Checked
@@ -47,16 +49,14 @@ sealed interface CardState {
  * gets an attempt per answer, and is closed by [dismiss], the next [check] or the view
  * model going away. [onCleared] closes it as not applied: a host that hands the text back
  * calls `dismiss(applied = true)` itself before finishing.
+ *
+ * [checker] is called on first use, off the main thread (making it can read assets).
+ * Hosts get one from [factory].
  */
-class CheckViewModel(application: Application) : AndroidViewModel(application) {
-    private val app = application as App
-    private val history = CheckHistory(
-        store = app.history,
-        environment = app.historyEnvironment,
-        scope = app.appScope,
-        log = { message, e -> Log.w(TAG, message, e) },
-        maxChars = Checker.MAX_CHARS,
-    )
+class CheckViewModel(
+    private val checker: () -> Checker,
+    private val history: CheckHistory,
+) : ViewModel() {
     private var text = ""
     private var language: Language? = null
     private var origin = Origin.Tester
@@ -66,6 +66,9 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
     /** Changes accepted before the current check started, kept while it runs. */
     private var carried: List<Edit> = emptyList()
     private var job: Job? = null
+
+    /** The settings the latest check ran (or is running) with; null before it read them. */
+    private var ranWith: CheckContext? = null
 
     /** Null before the first check and after [dismiss]. */
     var state by mutableStateOf<CardState?>(null)
@@ -96,6 +99,23 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
     /** Checks the same text again (a retry, or after settings changed), keeping answers and accepted changes. */
     fun recheck() = run(fresh = false)
 
+    /**
+     * Back from settings with the card still up: checks again, as [recheck] does, when the
+     * check failed or the settings that affect it ([CheckContext]) are no longer the ones it
+     * ran with. Does nothing when no card is open.
+     */
+    fun recheckIfStale() {
+        if (state == null) return
+        viewModelScope.launch {
+            val now = try {
+                withContext(Dispatchers.Default) { checker() }.context()
+            } catch (_: CheckFailure) {
+                null
+            }
+            if (state != null && (state is CardState.Failed || now == null || now != ranWith)) recheck()
+        }
+    }
+
     /** Overrides an assumption with the writer's [answer] and checks again. */
     fun settle(about: String, answer: String) {
         settled = settled.filterNot { it.about == about } + Settled(about, answer)
@@ -119,10 +139,11 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
             var answers = settled
             val shown = try {
                 // Creating the checker reads its prompt from assets, so not on the main thread.
-                val checker = withContext(Dispatchers.Default) { app.checker }
+                val checker = withContext(Dispatchers.Default) { checker() }
                 val context = checker.context()
+                ranWith = context
                 val ask: suspend () -> Checked = { checker.check(text, language, answers, context) }
-                val opening = opening(context, origin, hostApp, language)
+                val opening = Opening(origin, hostApp, language?.code, context.stored)
                 val answer = if (fresh) {
                     history.firstAttempt(text, opening, ask) { kept -> checker.reuse(text, language, kept.raw, context) }
                 } else {
@@ -143,7 +164,7 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
                 history.succeeded(answers, answer.value.raw, kept, reusedFrom = answer.reused?.sessionId)
                 CardState.Done(kept, answers)
             } catch (failure: CheckFailure) {
-                history.failed(answers, failure.reason.name, failure.detail, failure.raw)
+                history.failed(answers, failure.reason.token, failure.detail, failure.raw)
                 CardState.Failed(failure.reason, failure.detail)
             }
             state = shown
@@ -180,19 +201,6 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
     /** Gone without [dismiss]: nothing was handed back. */
     override fun onCleared() = history.close(finalText = null)
 
-    /** What a session records about a check of the current text with [context]. */
-    private fun opening(context: CheckContext, origin: Origin, hostApp: String?, language: Language?) = Opening(
-        origin = origin,
-        hostApp = hostApp,
-        requestedLanguage = language?.name,
-        nativeLanguage = context.native,
-        punctuation = context.punctuation,
-        judgments = context.judgments,
-        provider = context.provider,
-        model = context.model,
-        promptHash = context.promptHash,
-    )
-
     private val reviewed get() = (state as? CardState.Done)?.result as? CheckResult.Reviewed
 
     private fun update(change: (Revision) -> Revision) {
@@ -201,6 +209,24 @@ class CheckViewModel(application: Application) : AndroidViewModel(application) {
         val revision = change(current.revision)
         state = done.copy(result = current.copy(revision = revision))
         history.changed(revision)
+    }
+
+    companion object {
+        /** Makes a card's view model with the app's checker and history. */
+        fun factory(app: App): ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                CheckViewModel(
+                    checker = { app.checker },
+                    history = CheckHistory(
+                        store = app.history,
+                        environment = app.historyEnvironment,
+                        scope = app.appScope,
+                        log = { message, e -> Log.w(TAG, message, e) },
+                        maxChars = Checker.MAX_CHARS,
+                    ),
+                )
+            }
+        }
     }
 }
 
